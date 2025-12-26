@@ -37,7 +37,13 @@ export default function Auth() {
         body: { email },
       });
 
-      if (error) throw error;
+      if (error) {
+        throw new Error(error.message || 'Failed to send OTP');
+      }
+
+      if (data?.error) {
+        throw new Error(data.error);
+      }
 
       toast({
         title: 'OTP Sent!',
@@ -48,7 +54,7 @@ export default function Auth() {
       console.error('Error sending OTP:', error);
       toast({
         title: 'Failed to send OTP',
-        description: error.message || 'Please try again.',
+        description: error.message || 'Please try again later.',
         variant: 'destructive',
       });
     } finally {

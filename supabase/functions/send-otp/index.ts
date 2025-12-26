@@ -132,17 +132,33 @@ const handler = async (req: Request): Promise<Response> => {
       }),
     });
 
+    const emailResult = await emailResponse.json();
+    console.log("Resend API response:", JSON.stringify(emailResult));
+
     if (!emailResponse.ok) {
-      const errorData = await emailResponse.text();
-      console.error("Resend API error:", errorData);
+      console.error("Resend API error:", emailResult);
+      
+      // Check for specific Resend errors
+      const errorMessage = emailResult?.message || emailResult?.error?.message || "Failed to send email";
+      
+      // Handle the case where emails can only be sent to verified addresses
+      if (errorMessage.includes("verify") || errorMessage.includes("domain") || emailResult?.statusCode === 403) {
+        return new Response(
+          JSON.stringify({ 
+            error: "Email delivery is currently limited. Please contact the administrator or try with a different email provider.",
+            details: "The email service requires domain verification for sending to all addresses."
+          }),
+          { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
+      }
+      
       return new Response(
-        JSON.stringify({ error: "Failed to send email" }),
+        JSON.stringify({ error: errorMessage }),
         { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
       );
     }
 
-    const emailResult = await emailResponse.json();
-    console.log("Email sent:", emailResult);
+    console.log("Email sent successfully:", emailResult.id);
 
     return new Response(
       JSON.stringify({ success: true, message: "OTP sent successfully" }),
@@ -151,7 +167,7 @@ const handler = async (req: Request): Promise<Response> => {
   } catch (error: any) {
     console.error("Error in send-otp:", error);
     return new Response(
-      JSON.stringify({ error: error.message || "Internal server error" }),
+      JSON.stringify({ error: "An unexpected error occurred. Please try again." }),
       { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
     );
   }
