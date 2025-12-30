@@ -1,1 +1,13 @@
 project_id = "rdsvkfbtrslgfwvyufno"
+
+[functions.send-otp]
+verify_jwt = false
+
+[functions.verify-otp]
+verify_jwt = false
+
+[functions.record-action]
+verify_jwt = false
+
+[functions.admin-users]
+verify_jwt = false

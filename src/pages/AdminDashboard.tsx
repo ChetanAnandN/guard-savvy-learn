@@ -1,108 +1,411 @@
 import { useState, useEffect } from 'react';
-import { Users, Mail, AlertTriangle, TrendingUp } from 'lucide-react';
+import { Users, Mail, AlertTriangle, TrendingUp, UserPlus, Trash2, Loader2, Shield, RefreshCw } from 'lucide-react';
 import { Navbar } from '@/components/Navbar';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+
+interface UserWithPerformance {
+  id: string;
+  email: string;
+  role: string;
+  verified: boolean;
+  created_at: string;
+  score: number;
+  risk_level: string;
+  total_phishing_clicked: number;
+  total_phishing_reported: number;
+  total_safe_opened: number;
+  action_counts: {
+    opened: number;
+    clicked_link: number;
+    typed_credentials: number;
+    reported: number;
+    deleted: number;
+  };
+  has_interacted: boolean;
+  risk_comment: string;
+}
 
 export default function AdminDashboard() {
-  const [stats, setStats] = useState({ totalUsers: 0, totalEmails: 0, clickRate: 0 });
-  const [highRiskUsers, setHighRiskUsers] = useState<any[]>([]);
-  const [actionData, setActionData] = useState<any[]>([]);
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [users, setUsers] = useState<UserWithPerformance[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isAddingUser, setIsAddingUser] = useState(false);
+  const [newEmail, setNewEmail] = useState('');
+  const [newRole, setNewRole] = useState<'student' | 'instructor'>('student');
+  const [deleteEmail, setDeleteEmail] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
 
   useEffect(() => {
-    fetchStats();
+    fetchUsers();
   }, []);
 
-  const fetchStats = async () => {
-    const { data: users } = await supabase.from('users').select('*');
-    const { data: emails } = await supabase.from('emails').select('*');
-    const { data: actions } = await supabase.from('user_actions').select('*');
-    const { data: scores } = await supabase.from('scores').select('*, users(email)').order('score', { ascending: true }).limit(5);
+  const fetchUsers = async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-users', {
+        body: { action: 'list', adminEmail: user?.email },
+      });
 
-    const clicked = actions?.filter(a => a.action === 'clicked_link').length || 0;
-    const total = actions?.length || 1;
+      if (error) throw error;
+      if (data.error) throw new Error(data.error);
 
-    setStats({
-      totalUsers: users?.length || 0,
-      totalEmails: emails?.length || 0,
-      clickRate: Math.round((clicked / total) * 100),
-    });
+      setUsers(data.users || []);
+    } catch (error: any) {
+      console.error('Error fetching users:', error);
+      toast({
+        title: 'Error loading users',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-    setHighRiskUsers(scores || []);
+  const handleAddUser = async () => {
+    if (!newEmail || !newEmail.includes('@')) {
+      toast({ title: 'Invalid email', variant: 'destructive' });
+      return;
+    }
 
-    const safe = actions?.filter(a => a.action === 'reported' || a.action === 'deleted').length || 0;
-    const unsafe = actions?.filter(a => a.action === 'clicked_link' || a.action === 'typed_credentials').length || 0;
-    setActionData([
-      { name: 'Safe Actions', value: safe, fill: 'hsl(var(--success))' },
-      { name: 'Unsafe Actions', value: unsafe, fill: 'hsl(var(--destructive))' },
-    ]);
+    setIsAddingUser(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-users', {
+        body: { action: 'add', adminEmail: user?.email, targetEmail: newEmail, targetRole: newRole },
+      });
+
+      if (error) throw error;
+      if (data.error) throw new Error(data.error);
+
+      toast({ title: 'User added successfully' });
+      setNewEmail('');
+      setNewRole('student');
+      setAddDialogOpen(false);
+      fetchUsers();
+    } catch (error: any) {
+      toast({ title: 'Failed to add user', description: error.message, variant: 'destructive' });
+    } finally {
+      setIsAddingUser(false);
+    }
+  };
+
+  const handleRemoveUser = async (email: string) => {
+    setIsDeleting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-users', {
+        body: { action: 'remove', adminEmail: user?.email, targetEmail: email },
+      });
+
+      if (error) throw error;
+      if (data.error) throw new Error(data.error);
+
+      toast({ title: 'User removed successfully' });
+      setDeleteEmail(null);
+      fetchUsers();
+    } catch (error: any) {
+      toast({ title: 'Failed to remove user', description: error.message, variant: 'destructive' });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const stats = {
+    totalUsers: users.length,
+    students: users.filter(u => u.role === 'student').length,
+    highRisk: users.filter(u => u.risk_level === 'high').length,
+    interacted: users.filter(u => u.has_interacted).length,
+  };
+
+  const actionData = [
+    { name: 'Safe Actions', value: users.reduce((acc, u) => acc + u.action_counts.reported + u.action_counts.deleted, 0), fill: 'hsl(var(--success))' },
+    { name: 'Risky Actions', value: users.reduce((acc, u) => acc + u.action_counts.clicked_link + u.action_counts.typed_credentials, 0), fill: 'hsl(var(--destructive))' },
+  ];
+
+  const getRiskBadgeVariant = (level: string) => {
+    switch (level) {
+      case 'high': return 'destructive';
+      case 'medium': return 'secondary';
+      default: return 'outline';
+    }
   };
 
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
       <div className="pt-20 px-4 pb-8">
-        <div className="max-w-6xl mx-auto">
-          <h1 className="text-3xl font-bold mb-8">👨‍🏫 Instructor Dashboard</h1>
+        <div className="max-w-7xl mx-auto">
+          {/* Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+            <div>
+              <h1 className="text-3xl font-bold flex items-center gap-2">
+                <Shield className="h-8 w-8 text-primary" />
+                Admin Dashboard
+              </h1>
+              <p className="text-muted-foreground mt-1">Manage users and monitor performance</p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={fetchUsers} disabled={isLoading}>
+                <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+              <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button className="btn-gradient">
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    Add User
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Add New User</DialogTitle>
+                    <DialogDescription>Add a user to the PhishGuard platform. They will receive OTP when they login.</DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 py-4">
+                    <div>
+                      <label className="text-sm font-medium">Email</label>
+                      <Input
+                        placeholder="user@example.com"
+                        value={newEmail}
+                        onChange={(e) => setNewEmail(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Role</label>
+                      <Select value={newRole} onValueChange={(v: 'student' | 'instructor') => setNewRole(v)}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="student">Student</SelectItem>
+                          <SelectItem value="instructor">Instructor</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setAddDialogOpen(false)}>Cancel</Button>
+                    <Button onClick={handleAddUser} disabled={isAddingUser}>
+                      {isAddingUser ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add User'}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </div>
 
-          <div className="grid md:grid-cols-4 gap-6 mb-8">
+          {/* Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
             <Card className="glass-card">
-              <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Total Students</CardTitle></CardHeader>
-              <CardContent><div className="text-3xl font-bold">{stats.totalUsers}</div></CardContent>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm text-muted-foreground flex items-center gap-2">
+                  <Users className="h-4 w-4" /> Total Users
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">{stats.totalUsers}</div>
+              </CardContent>
             </Card>
             <Card className="glass-card">
-              <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Phishing Emails</CardTitle></CardHeader>
-              <CardContent><div className="text-3xl font-bold">{stats.totalEmails}</div></CardContent>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm text-muted-foreground">Students</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-primary">{stats.students}</div>
+              </CardContent>
             </Card>
             <Card className="glass-card">
-              <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Click-Through Rate</CardTitle></CardHeader>
-              <CardContent><div className="text-3xl font-bold text-warning">{stats.clickRate}%</div></CardContent>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm text-muted-foreground flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4" /> High Risk
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-destructive">{stats.highRisk}</div>
+              </CardContent>
             </Card>
             <Card className="glass-card">
-              <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">High Risk Users</CardTitle></CardHeader>
-              <CardContent><div className="text-3xl font-bold text-destructive">{highRiskUsers.filter(u => u.risk_level === 'high').length}</div></CardContent>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm text-muted-foreground flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4" /> Interacted
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-success">{stats.interacted}</div>
+              </CardContent>
             </Card>
           </div>
 
-          <div className="grid md:grid-cols-2 gap-6">
+          <div className="grid lg:grid-cols-3 gap-6 mb-8">
+            {/* Pie Chart */}
             <Card className="glass-card">
-              <CardHeader><CardTitle>Safe vs Unsafe Actions</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle>Actions Overview</CardTitle>
+                <CardDescription>Safe vs risky user behaviors</CardDescription>
+              </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={250}>
+                <ResponsiveContainer width="100%" height={200}>
                   <PieChart>
-                    <Pie data={actionData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} dataKey="value" label>
+                    <Pie data={actionData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" label>
                       {actionData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
                     </Pie>
                     <Tooltip />
                   </PieChart>
                 </ResponsiveContainer>
+                <div className="flex justify-center gap-4 mt-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-success" />
+                    <span className="text-sm">Safe</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-destructive" />
+                    <span className="text-sm">Risky</span>
+                  </div>
+                </div>
               </CardContent>
             </Card>
 
-            <Card className="glass-card">
-              <CardHeader><CardTitle>High-Risk Students</CardTitle></CardHeader>
+            {/* Quick Stats */}
+            <Card className="glass-card lg:col-span-2">
+              <CardHeader>
+                <CardTitle>Platform Summary</CardTitle>
+              </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {highRiskUsers.length === 0 ? (
-                    <p className="text-muted-foreground text-center py-8">No data yet</p>
-                  ) : (
-                    highRiskUsers.map((user) => (
-                      <div key={user.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                        <span className="text-sm font-medium">{user.users?.email || 'Unknown'}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm">Score: {user.score}</span>
-                          <span className={`text-xs px-2 py-1 rounded-full ${user.risk_level === 'high' ? 'bg-destructive/20 text-destructive' : user.risk_level === 'medium' ? 'bg-warning/20 text-warning' : 'bg-success/20 text-success'}`}>
-                            {user.risk_level}
-                          </span>
-                        </div>
-                      </div>
-                    ))
-                  )}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 rounded-lg bg-muted/50">
+                    <p className="text-sm text-muted-foreground">Total Phishing Clicks</p>
+                    <p className="text-2xl font-bold text-destructive">
+                      {users.reduce((acc, u) => acc + u.total_phishing_clicked, 0)}
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-lg bg-muted/50">
+                    <p className="text-sm text-muted-foreground">Total Reports</p>
+                    <p className="text-2xl font-bold text-success">
+                      {users.reduce((acc, u) => acc + u.total_phishing_reported, 0)}
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-lg bg-muted/50">
+                    <p className="text-sm text-muted-foreground">Credentials Entered</p>
+                    <p className="text-2xl font-bold text-warning">
+                      {users.reduce((acc, u) => acc + u.action_counts.typed_credentials, 0)}
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-lg bg-muted/50">
+                    <p className="text-sm text-muted-foreground">Average Score</p>
+                    <p className="text-2xl font-bold">
+                      {users.length > 0 ? Math.round(users.reduce((acc, u) => acc + u.score, 0) / users.length) : 100}
+                    </p>
+                  </div>
                 </div>
               </CardContent>
             </Card>
           </div>
+
+          {/* Users Table */}
+          <Card className="glass-card">
+            <CardHeader>
+              <CardTitle>All Users</CardTitle>
+              <CardDescription>Performance and risk assessment for each user</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {isLoading ? (
+                <div className="flex justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                </div>
+              ) : users.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>No users found. Add users to get started.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left py-3 px-4 font-medium">Email</th>
+                        <th className="text-left py-3 px-4 font-medium">Role</th>
+                        <th className="text-left py-3 px-4 font-medium">Score</th>
+                        <th className="text-left py-3 px-4 font-medium">Risk Level</th>
+                        <th className="text-left py-3 px-4 font-medium">Risk Comment</th>
+                        <th className="text-left py-3 px-4 font-medium">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {users.map((u) => (
+                        <tr key={u.id} className="border-b hover:bg-muted/30 transition-colors">
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2">
+                              <Mail className="h-4 w-4 text-muted-foreground" />
+                              <span className="font-medium">{u.email}</span>
+                              {!u.verified && <Badge variant="outline" className="text-xs">Unverified</Badge>}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <Badge variant={u.role === 'instructor' ? 'default' : 'secondary'}>
+                              {u.role}
+                            </Badge>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className={`font-bold ${u.score >= 80 ? 'text-success' : u.score >= 50 ? 'text-warning' : 'text-destructive'}`}>
+                              {u.score}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <Badge variant={getRiskBadgeVariant(u.risk_level)}>
+                              {u.has_interacted ? u.risk_level : 'normal'}
+                            </Badge>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="text-sm text-muted-foreground">{u.risk_comment}</span>
+                          </td>
+                          <td className="py-3 px-4">
+                            {u.email !== user?.email && (
+                              <Dialog open={deleteEmail === u.email} onOpenChange={(open) => !open && setDeleteEmail(null)}>
+                                <DialogTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                    onClick={() => setDeleteEmail(u.email)}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </DialogTrigger>
+                                <DialogContent>
+                                  <DialogHeader>
+                                    <DialogTitle>Remove User</DialogTitle>
+                                    <DialogDescription>
+                                      Are you sure you want to remove <strong>{u.email}</strong>? This will delete all their data.
+                                    </DialogDescription>
+                                  </DialogHeader>
+                                  <DialogFooter>
+                                    <Button variant="outline" onClick={() => setDeleteEmail(null)}>Cancel</Button>
+                                    <Button variant="destructive" onClick={() => handleRemoveUser(u.email)} disabled={isDeleting}>
+                                      {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Remove'}
+                                    </Button>
+                                  </DialogFooter>
+                                </DialogContent>
+                              </Dialog>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>
