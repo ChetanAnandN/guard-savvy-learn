@@ -15,12 +15,14 @@ export default function Auth() {
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { login } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
   const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
     
     if (!email || !email.includes('@')) {
       toast({
@@ -38,19 +40,15 @@ export default function Auth() {
       });
 
       if (error) {
-        // Try to parse error context for detailed message
-        let errorMessage = 'Failed to send OTP';
-        try {
-          const errorBody = error.context?.body ? await error.context.json() : null;
-          if (errorBody?.error) {
-            errorMessage = errorBody.error;
-          } else if (error.message) {
-            errorMessage = error.message;
-          }
-        } catch {
-          errorMessage = error.message || 'Failed to send OTP';
+        // Handle FunctionsHttpError - the error message is in the response body
+        let errorMsg = 'Failed to send OTP. Please try again.';
+        
+        // The supabase-js client puts the response body in error.context for non-2xx responses
+        if (error.message) {
+          errorMsg = error.message;
         }
-        throw new Error(errorMessage);
+        
+        throw new Error(errorMsg);
       }
 
       if (data?.error) {
@@ -64,9 +62,11 @@ export default function Auth() {
       setStep('otp');
     } catch (error: any) {
       console.error('Error sending OTP:', error);
+      const message = error.message || 'Please try again later.';
+      setErrorMessage(message);
       toast({
         title: 'Failed to send OTP',
-        description: error.message || 'Please try again later.',
+        description: message,
         variant: 'destructive',
       });
     } finally {
@@ -143,13 +143,23 @@ export default function Auth() {
 
           {step === 'email' ? (
             <form onSubmit={handleSendOTP} className="space-y-4">
+              {errorMessage && (
+                <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">
+                  <p className="font-medium">Unable to send OTP</p>
+                  <p className="text-xs mt-1 opacity-90">{errorMessage}</p>
+                </div>
+              )}
+              
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
                   type="email"
                   placeholder="your.email@college.edu"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setErrorMessage(null);
+                  }}
                   className="pl-10 h-12 text-lg"
                   disabled={isLoading}
                 />
