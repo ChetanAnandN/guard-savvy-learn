@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Users, Mail, AlertTriangle, TrendingUp, UserPlus, Trash2, Loader2, Shield, RefreshCw } from 'lucide-react';
+import { Users, Mail, AlertTriangle, TrendingUp, UserPlus, Trash2, Loader2, Shield, RefreshCw, Key, Lock } from 'lucide-react';
 import { Navbar } from '@/components/Navbar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -17,6 +17,7 @@ interface UserWithPerformance {
   email: string;
   role: string;
   verified: boolean;
+  has_password: boolean;
   created_at: string;
   score: number;
   risk_level: string;
@@ -41,10 +42,16 @@ export default function AdminDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [isAddingUser, setIsAddingUser] = useState(false);
   const [newEmail, setNewEmail] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<'student' | 'instructor'>('student');
   const [deleteEmail, setDeleteEmail] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  
+  // Password update state
+  const [passwordDialogUser, setPasswordDialogUser] = useState<string | null>(null);
+  const [updatePassword, setUpdatePassword] = useState('');
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
   useEffect(() => {
     fetchUsers();
@@ -79,17 +86,29 @@ export default function AdminDashboard() {
       return;
     }
 
+    if (newPassword && newPassword.length < 6) {
+      toast({ title: 'Password must be at least 6 characters', variant: 'destructive' });
+      return;
+    }
+
     setIsAddingUser(true);
     try {
       const { data, error } = await supabase.functions.invoke('admin-users', {
-        body: { action: 'add', adminEmail: user?.email, targetEmail: newEmail, targetRole: newRole },
+        body: { 
+          action: 'add', 
+          adminEmail: user?.email, 
+          targetEmail: newEmail, 
+          targetRole: newRole,
+          targetPassword: newPassword || undefined,
+        },
       });
 
       if (error) throw error;
       if (data.error) throw new Error(data.error);
 
-      toast({ title: 'User added successfully' });
+      toast({ title: 'User added successfully', description: newPassword ? 'User can login immediately' : 'User needs to register with OTP' });
       setNewEmail('');
+      setNewPassword('');
       setNewRole('student');
       setAddDialogOpen(false);
       fetchUsers();
@@ -97,6 +116,39 @@ export default function AdminDashboard() {
       toast({ title: 'Failed to add user', description: error.message, variant: 'destructive' });
     } finally {
       setIsAddingUser(false);
+    }
+  };
+
+  const handleUpdatePassword = async () => {
+    if (!passwordDialogUser) return;
+    
+    if (updatePassword.length < 6) {
+      toast({ title: 'Password must be at least 6 characters', variant: 'destructive' });
+      return;
+    }
+
+    setIsUpdatingPassword(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-users', {
+        body: { 
+          action: 'update-password', 
+          adminEmail: user?.email, 
+          targetEmail: passwordDialogUser,
+          targetPassword: updatePassword,
+        },
+      });
+
+      if (error) throw error;
+      if (data.error) throw new Error(data.error);
+
+      toast({ title: 'Password updated successfully' });
+      setPasswordDialogUser(null);
+      setUpdatePassword('');
+      fetchUsers();
+    } catch (error: any) {
+      toast({ title: 'Failed to update password', description: error.message, variant: 'destructive' });
+    } finally {
+      setIsUpdatingPassword(false);
     }
   };
 
@@ -169,16 +221,26 @@ export default function AdminDashboard() {
                 <DialogContent>
                   <DialogHeader>
                     <DialogTitle>Add New User</DialogTitle>
-                    <DialogDescription>Add a user to the PhishGuard platform. They will receive OTP when they login.</DialogDescription>
+                    <DialogDescription>Add a user to the PhishGuard platform. Set a password so they can login immediately, or leave blank to require OTP registration.</DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4 py-4">
                     <div>
-                      <label className="text-sm font-medium">Email</label>
+                      <label className="text-sm font-medium">Email *</label>
                       <Input
                         placeholder="user@example.com"
                         value={newEmail}
                         onChange={(e) => setNewEmail(e.target.value)}
                       />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Password (optional)</label>
+                      <Input
+                        type="password"
+                        placeholder="Min 6 characters (leave blank for OTP registration)"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">If set, user can login immediately without OTP</p>
                     </div>
                     <div>
                       <label className="text-sm font-medium">Role</label>
@@ -315,7 +377,7 @@ export default function AdminDashboard() {
           <Card className="glass-card">
             <CardHeader>
               <CardTitle>All Users</CardTitle>
-              <CardDescription>Performance and risk assessment for each user</CardDescription>
+              <CardDescription>Performance and risk assessment for each user. Click the key icon to set/update passwords.</CardDescription>
             </CardHeader>
             <CardContent>
               {isLoading ? (
@@ -347,7 +409,11 @@ export default function AdminDashboard() {
                             <div className="flex items-center gap-2">
                               <Mail className="h-4 w-4 text-muted-foreground" />
                               <span className="font-medium">{u.email}</span>
-                              {!u.verified && <Badge variant="outline" className="text-xs">Unverified</Badge>}
+                              {u.has_password ? (
+                                <Badge variant="outline" className="text-xs gap-1"><Lock className="h-3 w-3" /> Password</Badge>
+                              ) : (
+                                <Badge variant="secondary" className="text-xs">No Password</Badge>
+                              )}
                             </div>
                           </td>
                           <td className="py-3 px-4">
@@ -369,34 +435,74 @@ export default function AdminDashboard() {
                             <span className="text-sm text-muted-foreground">{u.risk_comment}</span>
                           </td>
                           <td className="py-3 px-4">
-                            {u.email !== user?.email && (
-                              <Dialog open={deleteEmail === u.email} onOpenChange={(open) => !open && setDeleteEmail(null)}>
+                            <div className="flex gap-1">
+                              {/* Set Password Button */}
+                              <Dialog open={passwordDialogUser === u.email} onOpenChange={(open) => !open && setPasswordDialogUser(null)}>
                                 <DialogTrigger asChild>
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                    onClick={() => setDeleteEmail(u.email)}
+                                    className="text-primary hover:text-primary hover:bg-primary/10"
+                                    onClick={() => setPasswordDialogUser(u.email)}
+                                    title="Set/Update Password"
                                   >
-                                    <Trash2 className="h-4 w-4" />
+                                    <Key className="h-4 w-4" />
                                   </Button>
                                 </DialogTrigger>
                                 <DialogContent>
                                   <DialogHeader>
-                                    <DialogTitle>Remove User</DialogTitle>
+                                    <DialogTitle>Set Password</DialogTitle>
                                     <DialogDescription>
-                                      Are you sure you want to remove <strong>{u.email}</strong>? This will delete all their data.
+                                      Set a new password for <strong>{u.email}</strong>
                                     </DialogDescription>
                                   </DialogHeader>
+                                  <div className="py-4">
+                                    <Input
+                                      type="password"
+                                      placeholder="New password (min 6 characters)"
+                                      value={updatePassword}
+                                      onChange={(e) => setUpdatePassword(e.target.value)}
+                                    />
+                                  </div>
                                   <DialogFooter>
-                                    <Button variant="outline" onClick={() => setDeleteEmail(null)}>Cancel</Button>
-                                    <Button variant="destructive" onClick={() => handleRemoveUser(u.email)} disabled={isDeleting}>
-                                      {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Remove'}
+                                    <Button variant="outline" onClick={() => { setPasswordDialogUser(null); setUpdatePassword(''); }}>Cancel</Button>
+                                    <Button onClick={handleUpdatePassword} disabled={isUpdatingPassword}>
+                                      {isUpdatingPassword ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Set Password'}
                                     </Button>
                                   </DialogFooter>
                                 </DialogContent>
                               </Dialog>
-                            )}
+
+                              {/* Delete Button */}
+                              {u.email !== user?.email && (
+                                <Dialog open={deleteEmail === u.email} onOpenChange={(open) => !open && setDeleteEmail(null)}>
+                                  <DialogTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                      onClick={() => setDeleteEmail(u.email)}
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </DialogTrigger>
+                                  <DialogContent>
+                                    <DialogHeader>
+                                      <DialogTitle>Remove User</DialogTitle>
+                                      <DialogDescription>
+                                        Are you sure you want to remove <strong>{u.email}</strong>? This will delete all their data.
+                                      </DialogDescription>
+                                    </DialogHeader>
+                                    <DialogFooter>
+                                      <Button variant="outline" onClick={() => setDeleteEmail(null)}>Cancel</Button>
+                                      <Button variant="destructive" onClick={() => handleRemoveUser(u.email)} disabled={isDeleting}>
+                                        {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Remove'}
+                                      </Button>
+                                    </DialogFooter>
+                                  </DialogContent>
+                                </Dialog>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}

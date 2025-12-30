@@ -168,6 +168,7 @@ export type Database = {
           created_at: string
           email: string
           id: string
+          password_hash: string | null
           role: Database["public"]["Enums"]["user_role"]
           verified: boolean
         }
@@ -175,6 +176,7 @@ export type Database = {
           created_at?: string
           email: string
           id?: string
+          password_hash?: string | null
           role?: Database["public"]["Enums"]["user_role"]
           verified?: boolean
         }
@@ -182,6 +184,7 @@ export type Database = {
           created_at?: string
           email?: string
           id?: string
+          password_hash?: string | null
           role?: Database["public"]["Enums"]["user_role"]
           verified?: boolean
         }
