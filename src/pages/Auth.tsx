@@ -38,7 +38,19 @@ export default function Auth() {
       });
 
       if (error) {
-        throw new Error(error.message || 'Failed to send OTP');
+        // Try to parse error context for detailed message
+        let errorMessage = 'Failed to send OTP';
+        try {
+          const errorBody = error.context?.body ? await error.context.json() : null;
+          if (errorBody?.error) {
+            errorMessage = errorBody.error;
+          } else if (error.message) {
+            errorMessage = error.message;
+          }
+        } catch {
+          errorMessage = error.message || 'Failed to send OTP';
+        }
+        throw new Error(errorMessage);
       }
 
       if (data?.error) {
