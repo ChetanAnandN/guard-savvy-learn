@@ -8,6 +8,15 @@ const corsHeaders = {
 
 const ADMIN_EMAIL = 'chetan1920681@gmail.com';
 
+// Hash function matching login/register
+async function hashPassword(password: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -18,7 +27,7 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { action, adminEmail, targetEmail, targetRole } = await req.json();
+    const { action, adminEmail, targetEmail, targetRole, targetPassword } = await req.json();
 
     // Verify admin
     if (adminEmail !== ADMIN_EMAIL) {
@@ -86,6 +95,8 @@ serve(async (req) => {
 
           return {
             ...user,
+            has_password: !!user.password_hash,
+            password_hash: undefined, // Don't expose hash
             score: userScore?.score ?? 100,
             risk_level: userScore?.risk_level ?? 'low',
             total_phishing_clicked: userScore?.total_phishing_clicked ?? 0,
@@ -125,13 +136,20 @@ serve(async (req) => {
           );
         }
 
+        // Hash password if provided
+        let passwordHash = null;
+        if (targetPassword && targetPassword.length >= 6) {
+          passwordHash = await hashPassword(targetPassword);
+        }
+
         // Add new user
         const { data: newUser, error: insertError } = await supabase
           .from('users')
           .insert({
             email: targetEmail,
             role: targetRole || 'student',
-            verified: false,
+            verified: !!passwordHash,
+            password_hash: passwordHash,
           })
           .select()
           .single();
@@ -145,10 +163,42 @@ serve(async (req) => {
           risk_level: 'low',
         });
 
-        console.log('Added new user:', targetEmail);
+        console.log('Added new user:', targetEmail, 'with password:', !!passwordHash);
 
         return new Response(
           JSON.stringify({ success: true, user: newUser, message: 'User added successfully' }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      case 'update-password': {
+        if (!targetEmail) {
+          return new Response(
+            JSON.stringify({ error: 'Email is required' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        if (!targetPassword || targetPassword.length < 6) {
+          return new Response(
+            JSON.stringify({ error: 'Password must be at least 6 characters' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        const passwordHash = await hashPassword(targetPassword);
+
+        const { error: updateError } = await supabase
+          .from('users')
+          .update({ password_hash: passwordHash, verified: true })
+          .eq('email', targetEmail);
+
+        if (updateError) throw updateError;
+
+        console.log('Updated password for:', targetEmail);
+
+        return new Response(
+          JSON.stringify({ success: true, message: 'Password updated successfully' }),
           { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }

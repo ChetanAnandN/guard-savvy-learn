@@ -11,3 +11,9 @@ verify_jwt = false
 
 [functions.admin-users]
 verify_jwt = false
+
+[functions.register]
+verify_jwt = false
+
+[functions.login]
+verify_jwt = false
