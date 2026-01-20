@@ -7,12 +7,18 @@ const corsHeaders = {
 };
 
 // Scoring Formula: S = Sbase - (Wo×O) - (Wc×C) - (Wd×D) + (Wr×R)
-const SCORING_WEIGHTS = {
+// Where:
+// Sbase = 50 (base score)
+// O = Opening email: -1 point (fixed)
+// C = Clicking link: -10% of current score
+// D = Data/Password Entry: -25% of current score
+// R = Reporting email: +30% of current score
+const SCORING_CONFIG = {
   Sbase: 50,
-  Wo: 1,   // Opening email weight (Low penalty)
-  Wc: 10,  // Clicking link weight (Medium penalty)
-  Wd: 20,  // Data/Password entry weight (High penalty)
-  Wr: 15,  // Reporting email weight (High reward)
+  openedPenalty: 1,        // Fixed -1 point
+  clickedPenaltyPercent: 10,  // -10% of current score
+  credentialsPenaltyPercent: 25, // -25% of current score
+  reportedBonusPercent: 30,    // +30% of current score
 };
 
 interface RecordActionRequest {
@@ -31,17 +37,32 @@ interface ActionCounts {
 }
 
 function calculateScore(actions: ActionCounts): number {
-  const { Sbase, Wo, Wc, Wd, Wr } = SCORING_WEIGHTS;
+  const { Sbase, openedPenalty, clickedPenaltyPercent, credentialsPenaltyPercent, reportedBonusPercent } = SCORING_CONFIG;
   
-  const O = actions.opened;
-  const C = actions.clicked_link;
-  const D = actions.typed_credentials;
-  const R = actions.reported;
+  let score = Sbase;
   
-  const score = Sbase - (Wo * O) - (Wc * C) - (Wd * D) + (Wr * R);
+  // Apply opened penalties (fixed -1 each)
+  for (let i = 0; i < actions.opened; i++) {
+    score = Math.max(0, score - openedPenalty);
+  }
   
-  // Clamp between 0 and 100
-  return Math.max(0, Math.min(100, score));
+  // Apply clicked link penalties (-10% each)
+  for (let i = 0; i < actions.clicked_link; i++) {
+    score = Math.max(0, score - (score * clickedPenaltyPercent / 100));
+  }
+  
+  // Apply credential penalties (-25% each)
+  for (let i = 0; i < actions.typed_credentials; i++) {
+    score = Math.max(0, score - (score * credentialsPenaltyPercent / 100));
+  }
+  
+  // Apply reporting bonuses (+30% each, capped at 100)
+  for (let i = 0; i < actions.reported; i++) {
+    score = Math.min(100, score + (score * reportedBonusPercent / 100));
+  }
+  
+  // Round to 2 decimal places and clamp between 0 and 100
+  return Math.round(Math.max(0, Math.min(100, score)) * 100) / 100;
 }
 
 function getRiskLevel(score: number): "low" | "medium" | "high" {
@@ -127,10 +148,9 @@ const handler = async (req: Request): Promise<Response> => {
       });
     }
 
-    // Calculate new score using the formula
+    // Calculate new score using the percentage-based formula
     const newScore = calculateScore(actionCounts);
     const riskLevel = getRiskLevel(newScore);
-    const isPhishing = email.type === "phishing" || email.type === "suspicious";
 
     // Check if score record exists
     const { data: currentScore, error: scoreError } = await supabase

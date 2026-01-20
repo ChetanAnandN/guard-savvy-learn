@@ -10,7 +10,7 @@ import {
   LineChart, Line, Legend, PieChart, Pie, Cell, RadarChart, PolarGrid, 
   PolarAngleAxis, PolarRadiusAxis, Radar
 } from 'recharts';
-import { calculateScore, getRiskLevel, getRiskComment, ActionCounts, SCORING_WEIGHTS } from '@/lib/scoring';
+import { calculateScore, getRiskLevel, getRiskComment, ActionCounts, SCORING_CONFIG } from '@/lib/scoring';
 
 interface UserStats {
   email: string;
@@ -70,7 +70,7 @@ export default function InstructorAnalytics() {
   const interactedUsers = users.filter(u => u.hasInteracted);
   const avgScore = interactedUsers.length > 0 
     ? Math.round(interactedUsers.reduce((sum, u) => sum + u.score, 0) / interactedUsers.length) 
-    : SCORING_WEIGHTS.Sbase;
+    : SCORING_CONFIG.Sbase;
   
   const avgOpened = interactedUsers.length > 0 
     ? (interactedUsers.reduce((sum, u) => sum + u.actions.opened, 0) / interactedUsers.length).toFixed(1) 
