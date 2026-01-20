@@ -6,11 +6,48 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Scoring Formula: S = Sbase - (Wo×O) - (Wc×C) - (Wd×D) + (Wr×R)
+const SCORING_WEIGHTS = {
+  Sbase: 50,
+  Wo: 1,   // Opening email weight (Low penalty)
+  Wc: 10,  // Clicking link weight (Medium penalty)
+  Wd: 20,  // Data/Password entry weight (High penalty)
+  Wr: 15,  // Reporting email weight (High reward)
+};
+
 interface RecordActionRequest {
   userId: string;
   emailId: string;
   action: "opened" | "clicked_link" | "typed_credentials" | "reported" | "deleted" | "marked_safe";
   metadata?: Record<string, any>;
+}
+
+interface ActionCounts {
+  opened: number;
+  clicked_link: number;
+  typed_credentials: number;
+  reported: number;
+  deleted: number;
+}
+
+function calculateScore(actions: ActionCounts): number {
+  const { Sbase, Wo, Wc, Wd, Wr } = SCORING_WEIGHTS;
+  
+  const O = actions.opened;
+  const C = actions.clicked_link;
+  const D = actions.typed_credentials;
+  const R = actions.reported;
+  
+  const score = Sbase - (Wo * O) - (Wc * C) - (Wd * D) + (Wr * R);
+  
+  // Clamp between 0 and 100
+  return Math.max(0, Math.min(100, score));
+}
+
+function getRiskLevel(score: number): "low" | "medium" | "high" {
+  if (score >= 40) return "low";
+  if (score >= 20) return "medium";
+  return "high";
 }
 
 const handler = async (req: Request): Promise<Response> => {
@@ -68,30 +105,34 @@ const handler = async (req: Request): Promise<Response> => {
       );
     }
 
-    // Calculate score change based on action and email type
-    let scoreChange = 0;
-    const isPhishing = email.type === "phishing" || email.type === "suspicious";
+    // Get all user actions to recalculate score
+    const { data: allActions } = await supabase
+      .from("user_actions")
+      .select("action")
+      .eq("user_id", userId);
 
-    switch (action) {
-      case "clicked_link":
-        if (isPhishing) scoreChange = -50;
-        break;
-      case "typed_credentials":
-        if (isPhishing) scoreChange = -20;
-        break;
-      case "reported":
-        if (isPhishing) scoreChange = 40;
-        break;
-      case "deleted":
-        if (isPhishing) scoreChange = 20;
-        break;
-      case "opened":
-      case "marked_safe":
-        scoreChange = 0;
-        break;
+    const actionCounts: ActionCounts = {
+      opened: 0,
+      clicked_link: 0,
+      typed_credentials: 0,
+      reported: 0,
+      deleted: 0,
+    };
+
+    if (allActions) {
+      allActions.forEach((a) => {
+        if (a.action in actionCounts) {
+          actionCounts[a.action as keyof ActionCounts]++;
+        }
+      });
     }
 
-    // Update user score
+    // Calculate new score using the formula
+    const newScore = calculateScore(actionCounts);
+    const riskLevel = getRiskLevel(newScore);
+    const isPhishing = email.type === "phishing" || email.type === "suspicious";
+
+    // Check if score record exists
     const { data: currentScore, error: scoreError } = await supabase
       .from("scores")
       .select("*")
@@ -102,34 +143,23 @@ const handler = async (req: Request): Promise<Response> => {
       // Create score record if doesn't exist
       await supabase.from("scores").insert({
         user_id: userId,
-        score: Math.max(0, Math.min(100, 100 + scoreChange)),
-        risk_level: "low",
-        total_phishing_clicked: action === "clicked_link" && isPhishing ? 1 : 0,
-        total_phishing_reported: action === "reported" && isPhishing ? 1 : 0,
+        score: newScore,
+        risk_level: riskLevel,
+        total_phishing_clicked: actionCounts.clicked_link,
+        total_phishing_reported: actionCounts.reported,
         total_safe_opened: email.type === "safe" && action === "opened" ? 1 : 0,
       });
     } else {
-      const newScore = Math.max(0, Math.min(100, currentScore.score + scoreChange));
-      
-      // Determine risk level based on score
-      let riskLevel: "low" | "medium" | "high" = "low";
-      if (newScore < 40) riskLevel = "high";
-      else if (newScore < 70) riskLevel = "medium";
-
       const updates: any = {
         score: newScore,
         risk_level: riskLevel,
         last_updated: new Date().toISOString(),
+        total_phishing_clicked: actionCounts.clicked_link,
+        total_phishing_reported: actionCounts.reported,
       };
 
-      if (action === "clicked_link" && isPhishing) {
-        updates.total_phishing_clicked = currentScore.total_phishing_clicked + 1;
-      }
-      if (action === "reported" && isPhishing) {
-        updates.total_phishing_reported = currentScore.total_phishing_reported + 1;
-      }
       if (email.type === "safe" && action === "opened") {
-        updates.total_safe_opened = currentScore.total_safe_opened + 1;
+        updates.total_safe_opened = (currentScore.total_safe_opened || 0) + 1;
       }
 
       await supabase
@@ -138,12 +168,15 @@ const handler = async (req: Request): Promise<Response> => {
         .eq("user_id", userId);
     }
 
-    console.log("Action recorded successfully:", { action, scoreChange });
+    const scoreChange = currentScore ? newScore - currentScore.score : 0;
+    console.log("Action recorded successfully:", { action, newScore, riskLevel });
 
     return new Response(
       JSON.stringify({ 
         success: true, 
         scoreChange,
+        newScore,
+        riskLevel,
         message: scoreChange < 0 
           ? "⚠️ Your awareness score decreased" 
           : scoreChange > 0 
