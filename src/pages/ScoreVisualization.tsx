@@ -6,7 +6,7 @@ import { Progress } from '@/components/ui/progress';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from 'recharts';
-import { SCORING_WEIGHTS, calculateScore, getScoreBreakdown, getRiskLevel, getRiskComment, ActionCounts } from '@/lib/scoring';
+import { SCORING_CONFIG, calculateScore, getScoreBreakdown, getRiskLevel, getRiskComment, ActionCounts } from '@/lib/scoring';
 
 export default function ScoreVisualization() {
   const { user } = useAuth();
@@ -72,10 +72,10 @@ export default function ScoreVisualization() {
   ];
 
   const actionBreakdown = [
-    { name: 'Opened', count: actions.opened, weight: SCORING_WEIGHTS.Wo, impact: -SCORING_WEIGHTS.Wo * actions.opened, icon: Mail, color: 'text-warning' },
-    { name: 'Clicked Links', count: actions.clicked_link, weight: SCORING_WEIGHTS.Wc, impact: -SCORING_WEIGHTS.Wc * actions.clicked_link, icon: MousePointer, color: 'text-destructive' },
-    { name: 'Entered Credentials', count: actions.typed_credentials, weight: SCORING_WEIGHTS.Wd, impact: -SCORING_WEIGHTS.Wd * actions.typed_credentials, icon: KeyRound, color: 'text-destructive' },
-    { name: 'Reported', count: actions.reported, weight: SCORING_WEIGHTS.Wr, impact: SCORING_WEIGHTS.Wr * actions.reported, icon: Flag, color: 'text-success' },
+    { name: 'Opened', count: actions.opened, weight: `${SCORING_CONFIG.openedPenalty} pt`, impact: breakdown.openedPenalty, icon: Mail, color: 'text-warning' },
+    { name: 'Clicked Links', count: actions.clicked_link, weight: `${SCORING_CONFIG.clickedPenaltyPercent}%`, impact: breakdown.clickedPenalty, icon: MousePointer, color: 'text-destructive' },
+    { name: 'Entered Credentials', count: actions.typed_credentials, weight: `${SCORING_CONFIG.credentialsPenaltyPercent}%`, impact: breakdown.credentialsPenalty, icon: KeyRound, color: 'text-destructive' },
+    { name: 'Reported', count: actions.reported, weight: `+${SCORING_CONFIG.reportedBonusPercent}%`, impact: breakdown.reportedBonus, icon: Flag, color: 'text-success' },
   ];
 
   const getRiskColor = () => {
@@ -145,7 +145,7 @@ export default function ScoreVisualization() {
             <CardHeader>
               <CardTitle>Formula Breakdown</CardTitle>
               <CardDescription>
-                S = {SCORING_WEIGHTS.Sbase} - ({SCORING_WEIGHTS.Wo}×O) - ({SCORING_WEIGHTS.Wc}×C) - ({SCORING_WEIGHTS.Wd}×D) + ({SCORING_WEIGHTS.Wr}×R)
+                Percentage-based scoring: O = -{SCORING_CONFIG.openedPenalty} pt | C = -{SCORING_CONFIG.clickedPenaltyPercent}% | D = -{SCORING_CONFIG.credentialsPenaltyPercent}% | R = +{SCORING_CONFIG.reportedBonusPercent}%
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -165,9 +165,9 @@ export default function ScoreVisualization() {
                         <Shield className="h-4 w-4 text-primary" />
                         Base Score (Sbase)
                       </td>
-                      <td className="py-3 px-4">+{SCORING_WEIGHTS.Sbase}</td>
+                      <td className="py-3 px-4">+{SCORING_CONFIG.Sbase}</td>
                       <td className="py-3 px-4">-</td>
-                      <td className="py-3 px-4 text-primary font-medium">+{SCORING_WEIGHTS.Sbase}</td>
+                      <td className="py-3 px-4 text-primary font-medium">+{SCORING_CONFIG.Sbase}</td>
                     </tr>
                     {actionBreakdown.map((action) => (
                       <tr key={action.name} className="border-b">
@@ -175,7 +175,7 @@ export default function ScoreVisualization() {
                           <action.icon className={`h-4 w-4 ${action.color}`} />
                           {action.name} ({action.name === 'Reported' ? 'R' : action.name === 'Opened' ? 'O' : action.name === 'Clicked Links' ? 'C' : 'D'})
                         </td>
-                        <td className="py-3 px-4">{action.name === 'Reported' ? '+' : '-'}{action.weight}</td>
+                        <td className="py-3 px-4">{action.weight}</td>
                         <td className="py-3 px-4">{action.count}</td>
                         <td className={`py-3 px-4 font-medium ${action.impact > 0 ? 'text-success' : action.impact < 0 ? 'text-destructive' : ''}`}>
                           {action.impact > 0 ? '+' : ''}{action.impact}

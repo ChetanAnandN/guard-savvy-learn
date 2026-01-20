@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Users, Mail, AlertTriangle, TrendingUp, UserPlus, Trash2, Loader2, Shield, RefreshCw, Key, Lock } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Users, Mail, AlertTriangle, TrendingUp, UserPlus, Trash2, Loader2, Shield, RefreshCw, Key, Lock, LineChart } from 'lucide-react';
 import { Navbar } from '@/components/Navbar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,7 +10,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { 
+  PieChart, Pie, Cell, ResponsiveContainer, Tooltip, 
+  LineChart as RechartsLineChart, Line, XAxis, YAxis, CartesianGrid, Legend 
+} from 'recharts';
+import { format } from 'date-fns';
 
 interface UserWithPerformance {
   id: string;
@@ -35,6 +39,25 @@ interface UserWithPerformance {
   risk_comment: string;
 }
 
+interface ScoreHistoryPoint {
+  date: string;
+  [key: string]: string | number;
+}
+
+// Generate distinct colors for users
+const USER_COLORS = [
+  'hsl(var(--primary))',
+  'hsl(var(--destructive))',
+  'hsl(142, 76%, 36%)',
+  'hsl(38, 92%, 50%)',
+  'hsl(280, 65%, 60%)',
+  'hsl(190, 90%, 50%)',
+  'hsl(350, 80%, 60%)',
+  'hsl(60, 70%, 45%)',
+  'hsl(200, 70%, 50%)',
+  'hsl(320, 70%, 55%)',
+];
+
 export default function AdminDashboard() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -53,8 +76,13 @@ export default function AdminDashboard() {
   const [updatePassword, setUpdatePassword] = useState('');
   const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
+  // Score history for line chart
+  const [scoreHistory, setScoreHistory] = useState<ScoreHistoryPoint[]>([]);
+  const [hoveredUser, setHoveredUser] = useState<string | null>(null);
+
   useEffect(() => {
     fetchUsers();
+    fetchScoreHistory();
   }, []);
 
   const fetchUsers = async () => {
@@ -77,6 +105,100 @@ export default function AdminDashboard() {
       });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const fetchScoreHistory = async () => {
+    try {
+      // Fetch all user actions with timestamps
+      const { data: actions, error } = await supabase
+        .from('user_actions')
+        .select('user_id, action, created_at')
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+
+      // Fetch users for mapping
+      const { data: usersData } = await supabase.functions.invoke('admin-users', {
+        body: { action: 'list', adminEmail: user?.email },
+      });
+
+      const userMap = new Map<string, string>();
+      (usersData?.users || []).forEach((u: UserWithPerformance) => {
+        userMap.set(u.id, u.email.split('@')[0]); // Use username part for display
+      });
+
+      // Build score history by date
+      const scoreByDate = new Map<string, Map<string, number>>();
+      const userScores = new Map<string, number>();
+
+      // Initialize all users with base score
+      userMap.forEach((_, id) => userScores.set(id, 50));
+
+      if (actions) {
+        actions.forEach((action) => {
+          const dateKey = format(new Date(action.created_at), 'MMM dd');
+          const userId = action.user_id;
+          const username = userMap.get(userId) || userId.slice(0, 8);
+
+          let currentScore = userScores.get(userId) || 50;
+
+          // Apply percentage-based scoring
+          switch (action.action) {
+            case 'opened':
+              currentScore = Math.max(0, currentScore - 1);
+              break;
+            case 'clicked_link':
+              currentScore = Math.max(0, currentScore - (currentScore * 0.10));
+              break;
+            case 'typed_credentials':
+              currentScore = Math.max(0, currentScore - (currentScore * 0.25));
+              break;
+            case 'reported':
+              currentScore = Math.min(100, currentScore + (currentScore * 0.30));
+              break;
+          }
+
+          userScores.set(userId, currentScore);
+
+          if (!scoreByDate.has(dateKey)) {
+            scoreByDate.set(dateKey, new Map());
+          }
+          scoreByDate.get(dateKey)!.set(username, Math.round(currentScore * 100) / 100);
+        });
+      }
+
+      // Convert to chart data
+      const chartData: ScoreHistoryPoint[] = [];
+      const allUsernames = new Set<string>();
+      
+      scoreByDate.forEach((users) => {
+        users.forEach((_, username) => allUsernames.add(username));
+      });
+
+      // Initialize last known scores
+      const lastKnownScores = new Map<string, number>();
+      allUsernames.forEach(username => lastKnownScores.set(username, 50));
+
+      scoreByDate.forEach((users, date) => {
+        const point: ScoreHistoryPoint = { date };
+        
+        // Update with actual scores and carry forward last known
+        users.forEach((score, username) => {
+          lastKnownScores.set(username, score);
+        });
+        
+        // Include all users in each data point
+        lastKnownScores.forEach((score, username) => {
+          point[username] = score;
+        });
+        
+        chartData.push(point);
+      });
+
+      setScoreHistory(chartData);
+    } catch (error) {
+      console.error('Error fetching score history:', error);
     }
   };
 
@@ -165,6 +287,7 @@ export default function AdminDashboard() {
       toast({ title: 'User removed successfully' });
       setDeleteEmail(null);
       fetchUsers();
+      fetchScoreHistory();
     } catch (error: any) {
       toast({ title: 'Failed to remove user', description: error.message, variant: 'destructive' });
     } finally {
@@ -192,6 +315,11 @@ export default function AdminDashboard() {
     }
   };
 
+  // Get unique usernames for the line chart
+  const chartUsernames = scoreHistory.length > 0 
+    ? Object.keys(scoreHistory[scoreHistory.length - 1]).filter(k => k !== 'date')
+    : [];
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
@@ -207,7 +335,7 @@ export default function AdminDashboard() {
               <p className="text-muted-foreground mt-1">Manage users and monitor performance</p>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={fetchUsers} disabled={isLoading}>
+              <Button variant="outline" onClick={() => { fetchUsers(); fetchScoreHistory(); }} disabled={isLoading}>
                 <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
                 Refresh
               </Button>
@@ -365,13 +493,70 @@ export default function AdminDashboard() {
                   <div className="p-4 rounded-lg bg-muted/50">
                     <p className="text-sm text-muted-foreground">Average Score</p>
                     <p className="text-2xl font-bold">
-                      {users.length > 0 ? Math.round(users.reduce((acc, u) => acc + u.score, 0) / users.length) : 100}
+                      {users.length > 0 ? Math.round(users.reduce((acc, u) => acc + u.score, 0) / users.length) : 50}
                     </p>
                   </div>
                 </div>
               </CardContent>
             </Card>
           </div>
+
+          {/* Score History Line Chart */}
+          <Card className="glass-card mb-8">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <LineChart className="h-5 w-5" />
+                User Score Comparison Over Time
+              </CardTitle>
+              <CardDescription>Hover over a user's line to highlight it. Score changes based on actions (percentage-based formula).</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {scoreHistory.length > 0 ? (
+                <ResponsiveContainer width="100%" height={350}>
+                  <RechartsLineChart data={scoreHistory} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                    <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
+                    <Tooltip 
+                      contentStyle={{ 
+                        backgroundColor: 'hsl(var(--background))', 
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px',
+                      }}
+                    />
+                    <Legend 
+                      onMouseEnter={(e) => setHoveredUser(e.dataKey as string)}
+                      onMouseLeave={() => setHoveredUser(null)}
+                    />
+                    {chartUsernames.map((username, index) => (
+                      <Line
+                        key={username}
+                        type="monotone"
+                        dataKey={username}
+                        stroke={USER_COLORS[index % USER_COLORS.length]}
+                        strokeWidth={hoveredUser === username ? 4 : hoveredUser ? 1 : 2}
+                        opacity={hoveredUser && hoveredUser !== username ? 0.3 : 1}
+                        dot={{ r: hoveredUser === username ? 6 : 3 }}
+                        activeDot={{ r: 8 }}
+                        style={{
+                          filter: hoveredUser === username ? `drop-shadow(0 0 8px ${USER_COLORS[index % USER_COLORS.length]})` : 'none',
+                          transition: 'all 0.2s ease-in-out',
+                        }}
+                        onMouseEnter={() => setHoveredUser(username)}
+                        onMouseLeave={() => setHoveredUser(null)}
+                      />
+                    ))}
+                  </RechartsLineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                  <LineChart className="h-12 w-12 mb-4 opacity-50" />
+                  <p>No action history available yet</p>
+                  <p className="text-sm">User scores will appear here as they interact with emails</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Users Table */}
           <Card className="glass-card">
