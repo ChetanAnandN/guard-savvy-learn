@@ -1,8 +1,9 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { Shield, Menu, X, LogOut, User } from 'lucide-react';
+import { Shield, Menu, X, LogOut, User, BarChart3, Eye } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,7 +40,7 @@ export function Navbar() {
           </Link>
 
           {/* Desktop Navigation */}
-          <div className="hidden md:flex items-center gap-6">
+          <div className="hidden md:flex items-center gap-4">
             {user ? (
               <>
                 <Link 
@@ -54,6 +55,23 @@ export function Navbar() {
                 >
                   Inbox
                 </Link>
+                <Link 
+                  to="/score-visualization" 
+                  className="text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                >
+                  <Eye className="h-4 w-4" />
+                  Score
+                </Link>
+                {user.role === 'instructor' && (
+                  <Link 
+                    to="/analytics" 
+                    className="text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                  >
+                    <BarChart3 className="h-4 w-4" />
+                    Analytics
+                  </Link>
+                )}
+                <ThemeToggle />
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" className="gap-2">
@@ -74,21 +92,27 @@ export function Navbar() {
                 </DropdownMenu>
               </>
             ) : (
-              <Link to="/auth">
-                <Button className="btn-gradient px-6">
-                  Get Started
-                </Button>
-              </Link>
+              <>
+                <ThemeToggle />
+                <Link to="/auth">
+                  <Button className="btn-gradient px-6">
+                    Get Started
+                  </Button>
+                </Link>
+              </>
             )}
           </div>
 
           {/* Mobile menu button */}
-          <button
-            onClick={() => setIsOpen(!isOpen)}
-            className="md:hidden p-2 rounded-lg hover:bg-muted transition-colors"
-          >
-            {isOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
-          </button>
+          <div className="md:hidden flex items-center gap-2">
+            <ThemeToggle />
+            <button
+              onClick={() => setIsOpen(!isOpen)}
+              className="p-2 rounded-lg hover:bg-muted transition-colors"
+            >
+              {isOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -112,6 +136,24 @@ export function Navbar() {
                 >
                   Inbox
                 </Link>
+                <Link
+                  to="/score-visualization"
+                  onClick={() => setIsOpen(false)}
+                  className="block py-2 text-muted-foreground hover:text-foreground flex items-center gap-2"
+                >
+                  <Eye className="h-4 w-4" />
+                  Score Visualization
+                </Link>
+                {user.role === 'instructor' && (
+                  <Link
+                    to="/analytics"
+                    onClick={() => setIsOpen(false)}
+                    className="block py-2 text-muted-foreground hover:text-foreground flex items-center gap-2"
+                  >
+                    <BarChart3 className="h-4 w-4" />
+                    Analytics
+                  </Link>
+                )}
                 <Button 
                   variant="outline" 
                   className="w-full justify-start gap-2"
