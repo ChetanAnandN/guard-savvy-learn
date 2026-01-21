@@ -11,13 +11,13 @@ const corsHeaders = {
 // Sbase = 50 (base score)
 // C = Clicking link: -10% of current score
 // D = Data/Password Entry: -25% of current score
-// R = Reporting email: +15% of current score
+// R = Reporting email: +10% of current score
 // B = Blocking email: +25% of current score
 const SCORING_CONFIG = {
   Sbase: 50,
   clickedPenaltyPercent: 10,  // -10% of current score
   credentialsPenaltyPercent: 25, // -25% of current score
-  reportedBonusPercent: 15,    // +15% of current score
+  reportedBonusPercent: 10,    // +10% of current score
   blockedBonusPercent: 25,     // +25% of current score
 };
 
@@ -106,6 +106,30 @@ const handler = async (req: Request): Promise<Response> => {
         JSON.stringify({ error: "Email not found" }),
         { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } }
       );
+    }
+
+    // For scoring actions (clicked_link, reported, blocked), check if already recorded for this email
+    const scoringActions = ["clicked_link", "reported", "blocked"];
+    if (scoringActions.includes(action)) {
+      const { data: existingAction } = await supabase
+        .from("user_actions")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("email_id", emailId)
+        .eq("action", action)
+        .single();
+
+      if (existingAction) {
+        console.log("Action already recorded for this email:", { userId, emailId, action });
+        return new Response(
+          JSON.stringify({ 
+            success: true, 
+            alreadyRecorded: true,
+            message: "Action already recorded for this email"
+          }),
+          { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
+      }
     }
 
     // Record the action

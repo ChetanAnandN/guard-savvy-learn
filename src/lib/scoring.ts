@@ -10,7 +10,7 @@ export const SCORING_CONFIG = {
   Sbase: 50,
   clickedPenaltyPercent: 10,  // -10% of current score
   credentialsPenaltyPercent: 25, // -25% of current score
-  reportedBonusPercent: 15,    // +15% of current score
+  reportedBonusPercent: 10,    // +10% of current score
   blockedBonusPercent: 25,     // +25% of current score
 };
 
