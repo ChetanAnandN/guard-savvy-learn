@@ -108,8 +108,8 @@ const handler = async (req: Request): Promise<Response> => {
       );
     }
 
-    // For scoring actions (clicked_link, reported, blocked), check if already recorded for this email
-    const scoringActions = ["clicked_link", "reported", "blocked"];
+    // For scoring actions, check if already recorded for this email
+    const scoringActions = ["clicked_link", "typed_credentials", "reported", "blocked"];
     if (scoringActions.includes(action)) {
       const { data: existingAction } = await supabase
         .from("user_actions")

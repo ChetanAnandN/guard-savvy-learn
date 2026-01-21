@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -32,22 +32,21 @@ export default function PhishingTrap() {
     setShowWarning(true);
   };
 
-  const handleLinkClick = async () => {
-    if (user) {
-      const urlParams = new URLSearchParams(window.location.search);
-      const emailId = urlParams.get('from');
-      if (emailId) {
-        await supabase.functions.invoke('record-action', {
-          body: { userId: user.id, emailId, action: 'clicked_link' },
-        });
-      }
-    }
-  };
-
   // Record link click on mount
-  useState(() => {
-    handleLinkClick();
-  });
+  useEffect(() => {
+    const recordLinkClick = async () => {
+      if (user) {
+        const urlParams = new URLSearchParams(window.location.search);
+        const emailId = urlParams.get('from');
+        if (emailId) {
+          await supabase.functions.invoke('record-action', {
+            body: { userId: user.id, emailId, action: 'clicked_link' },
+          });
+        }
+      }
+    };
+    recordLinkClick();
+  }, [user]);
 
   if (showWarning) {
     return (
