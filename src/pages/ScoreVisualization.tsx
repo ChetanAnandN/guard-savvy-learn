@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Shield, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, Mail, MousePointer, KeyRound, Flag } from 'lucide-react';
+import { Shield, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, MousePointer, KeyRound, Flag, Ban } from 'lucide-react';
 import { Navbar } from '@/components/Navbar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
@@ -11,10 +11,10 @@ import { SCORING_CONFIG, calculateScore, getScoreBreakdown, getRiskLevel, getRis
 export default function ScoreVisualization() {
   const { user } = useAuth();
   const [actions, setActions] = useState<ActionCounts>({
-    opened: 0,
     clicked_link: 0,
     typed_credentials: 0,
     reported: 0,
+    blocked: 0,
     deleted: 0,
   });
   const [isLoading, setIsLoading] = useState(true);
@@ -35,10 +35,10 @@ export default function ScoreVisualization() {
 
       if (actionsData) {
         const counts: ActionCounts = {
-          opened: 0,
           clicked_link: 0,
           typed_credentials: 0,
           reported: 0,
+          blocked: 0,
           deleted: 0,
         };
         
@@ -60,22 +60,22 @@ export default function ScoreVisualization() {
   const breakdown = getScoreBreakdown(actions);
   const score = breakdown.finalScore;
   const riskLevel = getRiskLevel(score);
-  const hasInteracted = actions.opened + actions.clicked_link + actions.typed_credentials + actions.reported > 0;
+  const hasInteracted = actions.clicked_link + actions.typed_credentials + actions.reported + actions.blocked > 0;
   const riskComment = getRiskComment(score, hasInteracted);
 
   const formulaData = [
     { name: 'Base Score', value: breakdown.baseScore, fill: 'hsl(var(--primary))' },
-    { name: 'Opened Penalty', value: breakdown.openedPenalty, fill: 'hsl(var(--warning))' },
     { name: 'Clicked Penalty', value: breakdown.clickedPenalty, fill: 'hsl(var(--destructive))' },
     { name: 'Credentials Penalty', value: breakdown.credentialsPenalty, fill: 'hsl(var(--destructive))' },
     { name: 'Reported Bonus', value: breakdown.reportedBonus, fill: 'hsl(var(--success))' },
+    { name: 'Blocked Bonus', value: breakdown.blockedBonus, fill: 'hsl(var(--success))' },
   ];
 
   const actionBreakdown = [
-    { name: 'Opened', count: actions.opened, weight: `${SCORING_CONFIG.openedPenalty} pt`, impact: breakdown.openedPenalty, icon: Mail, color: 'text-warning' },
-    { name: 'Clicked Links', count: actions.clicked_link, weight: `${SCORING_CONFIG.clickedPenaltyPercent}%`, impact: breakdown.clickedPenalty, icon: MousePointer, color: 'text-destructive' },
-    { name: 'Entered Credentials', count: actions.typed_credentials, weight: `${SCORING_CONFIG.credentialsPenaltyPercent}%`, impact: breakdown.credentialsPenalty, icon: KeyRound, color: 'text-destructive' },
+    { name: 'Clicked Links', count: actions.clicked_link, weight: `-${SCORING_CONFIG.clickedPenaltyPercent}%`, impact: breakdown.clickedPenalty, icon: MousePointer, color: 'text-destructive' },
+    { name: 'Entered Credentials', count: actions.typed_credentials, weight: `-${SCORING_CONFIG.credentialsPenaltyPercent}%`, impact: breakdown.credentialsPenalty, icon: KeyRound, color: 'text-destructive' },
     { name: 'Reported', count: actions.reported, weight: `+${SCORING_CONFIG.reportedBonusPercent}%`, impact: breakdown.reportedBonus, icon: Flag, color: 'text-success' },
+    { name: 'Blocked', count: actions.blocked, weight: `+${SCORING_CONFIG.blockedBonusPercent}%`, impact: breakdown.blockedBonus, icon: Ban, color: 'text-success' },
   ];
 
   const getRiskColor = () => {
@@ -87,9 +87,8 @@ export default function ScoreVisualization() {
   };
 
   const pieData = [
-    { name: 'Good Actions', value: actions.reported + actions.deleted, fill: 'hsl(var(--success))' },
+    { name: 'Good Actions', value: actions.reported + actions.blocked + actions.deleted, fill: 'hsl(var(--success))' },
     { name: 'Risky Actions', value: actions.clicked_link + actions.typed_credentials, fill: 'hsl(var(--destructive))' },
-    { name: 'Neutral', value: actions.opened, fill: 'hsl(var(--muted-foreground))' },
   ].filter(d => d.value > 0);
 
   return (
@@ -105,11 +104,11 @@ export default function ScoreVisualization() {
           {/* Score Overview */}
           <div className="grid md:grid-cols-3 gap-6 mb-8">
             <Card className="glass-card md:col-span-2">
-              <CardHeader>
-                <CardTitle>Your Security Score</CardTitle>
-                <CardDescription>Based on the formula: S = Sbase - (Wo×O) - (Wc×C) - (Wd×D) + (Wr×R)</CardDescription>
-              </CardHeader>
-              <CardContent>
+            <CardHeader>
+              <CardTitle>Your Security Score</CardTitle>
+              <CardDescription>Based on the formula: S = Sbase - (Wc×C) - (Wd×D) + (Wr×R) + (Wb×B)</CardDescription>
+            </CardHeader>
+            <CardContent>
                 <div className="flex items-center gap-8">
                   <div className="text-center">
                     <div className="text-6xl font-bold gradient-text">{score}</div>
@@ -145,7 +144,7 @@ export default function ScoreVisualization() {
             <CardHeader>
               <CardTitle>Formula Breakdown</CardTitle>
               <CardDescription>
-                Percentage-based scoring: O = -{SCORING_CONFIG.openedPenalty} pt | C = -{SCORING_CONFIG.clickedPenaltyPercent}% | D = -{SCORING_CONFIG.credentialsPenaltyPercent}% | R = +{SCORING_CONFIG.reportedBonusPercent}%
+                Percentage-based scoring: C = -{SCORING_CONFIG.clickedPenaltyPercent}% | D = -{SCORING_CONFIG.credentialsPenaltyPercent}% | R = +{SCORING_CONFIG.reportedBonusPercent}% | B = +{SCORING_CONFIG.blockedBonusPercent}%
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -173,7 +172,7 @@ export default function ScoreVisualization() {
                       <tr key={action.name} className="border-b">
                         <td className="py-3 px-4 flex items-center gap-2">
                           <action.icon className={`h-4 w-4 ${action.color}`} />
-                          {action.name} ({action.name === 'Reported' ? 'R' : action.name === 'Opened' ? 'O' : action.name === 'Clicked Links' ? 'C' : 'D'})
+                          {action.name} ({action.name === 'Reported' ? 'R' : action.name === 'Blocked' ? 'B' : action.name === 'Clicked Links' ? 'C' : 'D'})
                         </td>
                         <td className="py-3 px-4">{action.weight}</td>
                         <td className="py-3 px-4">{action.count}</td>

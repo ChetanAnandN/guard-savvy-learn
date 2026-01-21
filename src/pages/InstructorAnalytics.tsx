@@ -41,10 +41,10 @@ export default function InstructorAnalytics() {
 
       const userStats: UserStats[] = (data.users || []).map((u: any) => {
         const actions: ActionCounts = {
-          opened: u.action_counts?.opened || 0,
           clicked_link: u.action_counts?.clicked_link || 0,
           typed_credentials: u.action_counts?.typed_credentials || 0,
           reported: u.action_counts?.reported || 0,
+          blocked: u.action_counts?.blocked || 0,
           deleted: u.action_counts?.deleted || 0,
         };
         const score = calculateScore(actions);
@@ -72,9 +72,6 @@ export default function InstructorAnalytics() {
     ? Math.round(interactedUsers.reduce((sum, u) => sum + u.score, 0) / interactedUsers.length) 
     : SCORING_CONFIG.Sbase;
   
-  const avgOpened = interactedUsers.length > 0 
-    ? (interactedUsers.reduce((sum, u) => sum + u.actions.opened, 0) / interactedUsers.length).toFixed(1) 
-    : '0';
   const avgClicked = interactedUsers.length > 0 
     ? (interactedUsers.reduce((sum, u) => sum + u.actions.clicked_link, 0) / interactedUsers.length).toFixed(1) 
     : '0';
@@ -84,11 +81,14 @@ export default function InstructorAnalytics() {
   const avgReported = interactedUsers.length > 0 
     ? (interactedUsers.reduce((sum, u) => sum + u.actions.reported, 0) / interactedUsers.length).toFixed(1) 
     : '0';
+  const avgBlocked = interactedUsers.length > 0 
+    ? (interactedUsers.reduce((sum, u) => sum + u.actions.blocked, 0) / interactedUsers.length).toFixed(1) 
+    : '0';
 
-  const totalOpened = users.reduce((sum, u) => sum + u.actions.opened, 0);
   const totalClicked = users.reduce((sum, u) => sum + u.actions.clicked_link, 0);
   const totalCredentials = users.reduce((sum, u) => sum + u.actions.typed_credentials, 0);
   const totalReported = users.reduce((sum, u) => sum + u.actions.reported, 0);
+  const totalBlocked = users.reduce((sum, u) => sum + u.actions.blocked, 0);
 
   // Risk distribution
   const riskDistribution = [
@@ -103,26 +103,26 @@ export default function InstructorAnalytics() {
     .map(u => ({
       name: u.email.split('@')[0].substring(0, 10),
       score: u.score,
-      opened: u.actions.opened,
       clicked: u.actions.clicked_link,
       credentials: u.actions.typed_credentials,
       reported: u.actions.reported,
+      blocked: u.actions.blocked,
     }));
 
   // Radar chart for averages
   const radarData = [
-    { subject: 'Emails Opened', A: parseFloat(avgOpened), fullMark: 20 },
     { subject: 'Links Clicked', A: parseFloat(avgClicked), fullMark: 10 },
     { subject: 'Credentials Entered', A: parseFloat(avgCredentials), fullMark: 5 },
     { subject: 'Reported', A: parseFloat(avgReported), fullMark: 20 },
+    { subject: 'Blocked', A: parseFloat(avgBlocked), fullMark: 20 },
   ];
 
   // Action totals for pie chart
   const actionTotals = [
-    { name: 'Opened', value: totalOpened, fill: 'hsl(var(--muted-foreground))' },
     { name: 'Clicked Links', value: totalClicked, fill: 'hsl(var(--warning))' },
     { name: 'Credentials', value: totalCredentials, fill: 'hsl(var(--destructive))' },
     { name: 'Reported', value: totalReported, fill: 'hsl(var(--success))' },
+    { name: 'Blocked', value: totalBlocked, fill: 'hsl(var(--primary))' },
   ].filter(d => d.value > 0);
 
   return (
@@ -171,14 +171,6 @@ export default function InstructorAnalytics() {
                 </Card>
                 <Card className="glass-card">
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-sm text-muted-foreground">Avg Opened</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-3xl font-bold text-muted-foreground">{avgOpened}</div>
-                  </CardContent>
-                </Card>
-                <Card className="glass-card">
-                  <CardHeader className="pb-2">
                     <CardTitle className="text-sm text-muted-foreground">Avg Clicked</CardTitle>
                   </CardHeader>
                   <CardContent>
@@ -191,6 +183,14 @@ export default function InstructorAnalytics() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-3xl font-bold text-success">{avgReported}</div>
+                  </CardContent>
+                </Card>
+                <Card className="glass-card">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm text-muted-foreground">Avg Blocked</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-3xl font-bold text-primary">{avgBlocked}</div>
                   </CardContent>
                 </Card>
               </div>
@@ -325,10 +325,10 @@ export default function InstructorAnalytics() {
                       <YAxis />
                       <Tooltip />
                       <Legend />
-                      <Bar dataKey="opened" name="Opened" fill="hsl(var(--muted-foreground))" stackId="stack" />
                       <Bar dataKey="clicked" name="Clicked Links" fill="hsl(var(--warning))" stackId="stack" />
                       <Bar dataKey="credentials" name="Credentials" fill="hsl(var(--destructive))" stackId="stack" />
                       <Bar dataKey="reported" name="Reported" fill="hsl(var(--success))" stackId="stack" />
+                      <Bar dataKey="blocked" name="Blocked" fill="hsl(var(--primary))" stackId="stack" />
                     </BarChart>
                   </ResponsiveContainer>
                 </CardContent>

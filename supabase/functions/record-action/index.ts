@@ -6,45 +6,40 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Scoring Formula: S = Sbase - (Wo×O) - (Wc×C) - (Wd×D) + (Wr×R)
+// Scoring Formula: S = Sbase - (Wc×C) - (Wd×D) + (Wr×R) + (Wb×B)
 // Where:
 // Sbase = 50 (base score)
-// O = Opening email: -1 point (fixed)
 // C = Clicking link: -10% of current score
 // D = Data/Password Entry: -25% of current score
-// R = Reporting email: +30% of current score
+// R = Reporting email: +15% of current score
+// B = Blocking email: +25% of current score
 const SCORING_CONFIG = {
   Sbase: 50,
-  openedPenalty: 1,        // Fixed -1 point
   clickedPenaltyPercent: 10,  // -10% of current score
   credentialsPenaltyPercent: 25, // -25% of current score
-  reportedBonusPercent: 30,    // +30% of current score
+  reportedBonusPercent: 15,    // +15% of current score
+  blockedBonusPercent: 25,     // +25% of current score
 };
 
 interface RecordActionRequest {
   userId: string;
   emailId: string;
-  action: "opened" | "clicked_link" | "typed_credentials" | "reported" | "deleted" | "marked_safe";
+  action: "opened" | "clicked_link" | "typed_credentials" | "reported" | "deleted" | "marked_safe" | "blocked";
   metadata?: Record<string, any>;
 }
 
 interface ActionCounts {
-  opened: number;
   clicked_link: number;
   typed_credentials: number;
   reported: number;
+  blocked: number;
   deleted: number;
 }
 
 function calculateScore(actions: ActionCounts): number {
-  const { Sbase, openedPenalty, clickedPenaltyPercent, credentialsPenaltyPercent, reportedBonusPercent } = SCORING_CONFIG;
+  const { Sbase, clickedPenaltyPercent, credentialsPenaltyPercent, reportedBonusPercent, blockedBonusPercent } = SCORING_CONFIG;
   
   let score = Sbase;
-  
-  // Apply opened penalties (fixed -1 each)
-  for (let i = 0; i < actions.opened; i++) {
-    score = Math.max(0, score - openedPenalty);
-  }
   
   // Apply clicked link penalties (-10% each)
   for (let i = 0; i < actions.clicked_link; i++) {
@@ -56,9 +51,14 @@ function calculateScore(actions: ActionCounts): number {
     score = Math.max(0, score - (score * credentialsPenaltyPercent / 100));
   }
   
-  // Apply reporting bonuses (+30% each, capped at 100)
+  // Apply reporting bonuses (+15% each, capped at 100)
   for (let i = 0; i < actions.reported; i++) {
     score = Math.min(100, score + (score * reportedBonusPercent / 100));
+  }
+  
+  // Apply blocking bonuses (+25% each, capped at 100)
+  for (let i = 0; i < actions.blocked; i++) {
+    score = Math.min(100, score + (score * blockedBonusPercent / 100));
   }
   
   // Round to 2 decimal places and clamp between 0 and 100
@@ -133,10 +133,10 @@ const handler = async (req: Request): Promise<Response> => {
       .eq("user_id", userId);
 
     const actionCounts: ActionCounts = {
-      opened: 0,
       clicked_link: 0,
       typed_credentials: 0,
       reported: 0,
+      blocked: 0,
       deleted: 0,
     };
 
