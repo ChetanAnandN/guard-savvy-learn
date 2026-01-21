@@ -207,6 +207,7 @@ export type Database = {
         | "reported"
         | "deleted"
         | "marked_safe"
+        | "blocked"
       user_role: "student" | "instructor"
     }
     CompositeTypes: {
@@ -344,6 +345,7 @@ export const Constants = {
         "reported",
         "deleted",
         "marked_safe",
+        "blocked",
       ],
       user_role: ["student", "instructor"],
     },

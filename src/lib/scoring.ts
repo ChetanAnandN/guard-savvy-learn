@@ -1,38 +1,33 @@
-// Scoring Formula: S = Sbase - (Wo×O) - (Wc×C) - (Wd×D) + (Wr×R)
+// Scoring Formula: S = Sbase - (Wc×C) - (Wd×D) + (Wr×R) + (Wb×B)
 // Where:
 // Sbase = 50 (base score)
-// O = Opening email: -1 point (fixed)
 // C = Clicking link: -10% of current score
 // D = Data/Password Entry: -25% of current score
-// R = Reporting email: +30% of current score
+// R = Reporting email: +15% of current score
+// B = Blocking email: +25% of current score
 
 export const SCORING_CONFIG = {
   Sbase: 50,
-  openedPenalty: 1,        // Fixed -1 point
   clickedPenaltyPercent: 10,  // -10% of current score
   credentialsPenaltyPercent: 25, // -25% of current score
-  reportedBonusPercent: 30,    // +30% of current score
+  reportedBonusPercent: 15,    // +15% of current score
+  blockedBonusPercent: 25,     // +25% of current score
 };
 
 export interface ActionCounts {
-  opened: number;
   clicked_link: number;
   typed_credentials: number;
   reported: number;
+  blocked: number;
   deleted: number;
 }
 
 // Calculate score by processing actions sequentially (percentage-based)
 // This simulates applying each action's effect on the running score
 export function calculateScore(actions: ActionCounts): number {
-  const { Sbase, openedPenalty, clickedPenaltyPercent, credentialsPenaltyPercent, reportedBonusPercent } = SCORING_CONFIG;
+  const { Sbase, clickedPenaltyPercent, credentialsPenaltyPercent, reportedBonusPercent, blockedBonusPercent } = SCORING_CONFIG;
   
   let score = Sbase;
-  
-  // Apply opened penalties (fixed -1 each)
-  for (let i = 0; i < actions.opened; i++) {
-    score = Math.max(0, score - openedPenalty);
-  }
   
   // Apply clicked link penalties (-10% each)
   for (let i = 0; i < actions.clicked_link; i++) {
@@ -44,9 +39,14 @@ export function calculateScore(actions: ActionCounts): number {
     score = Math.max(0, score - (score * credentialsPenaltyPercent / 100));
   }
   
-  // Apply reporting bonuses (+30% each, capped at 100)
+  // Apply reporting bonuses (+15% each, capped at 100)
   for (let i = 0; i < actions.reported; i++) {
     score = Math.min(100, score + (score * reportedBonusPercent / 100));
+  }
+  
+  // Apply blocking bonuses (+25% each, capped at 100)
+  for (let i = 0; i < actions.blocked; i++) {
+    score = Math.min(100, score + (score * blockedBonusPercent / 100));
   }
   
   // Round to 2 decimal places and clamp between 0 and 100
@@ -54,12 +54,10 @@ export function calculateScore(actions: ActionCounts): number {
 }
 
 export function getScoreBreakdown(actions: ActionCounts) {
-  const { Sbase, openedPenalty, clickedPenaltyPercent, credentialsPenaltyPercent, reportedBonusPercent } = SCORING_CONFIG;
+  const { Sbase, clickedPenaltyPercent, credentialsPenaltyPercent, reportedBonusPercent, blockedBonusPercent } = SCORING_CONFIG;
   
   // Calculate step by step to show breakdown
   let runningScore = Sbase;
-  const openedPenaltyTotal = Math.min(runningScore, actions.opened * openedPenalty);
-  runningScore -= openedPenaltyTotal;
   
   let clickedPenaltyTotal = 0;
   for (let i = 0; i < actions.clicked_link; i++) {
@@ -82,12 +80,19 @@ export function getScoreBreakdown(actions: ActionCounts) {
     runningScore = Math.min(100, runningScore + bonus);
   }
   
+  let blockedBonusTotal = 0;
+  for (let i = 0; i < actions.blocked; i++) {
+    const bonus = runningScore * blockedBonusPercent / 100;
+    blockedBonusTotal += bonus;
+    runningScore = Math.min(100, runningScore + bonus);
+  }
+  
   return {
     baseScore: Sbase,
-    openedPenalty: -Math.round(openedPenaltyTotal * 100) / 100,
     clickedPenalty: -Math.round(clickedPenaltyTotal * 100) / 100,
     credentialsPenalty: -Math.round(credentialsPenaltyTotal * 100) / 100,
     reportedBonus: Math.round(reportedBonusTotal * 100) / 100,
+    blockedBonus: Math.round(blockedBonusTotal * 100) / 100,
     finalScore: calculateScore(actions),
   };
 }
