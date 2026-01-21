@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, AlertTriangle, ExternalLink, Flag, Trash2, CheckCircle, Shield } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, ExternalLink, Flag, Trash2, CheckCircle, Shield, Ban } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -44,10 +44,21 @@ export default function EmailView() {
     setIsLoading(false);
   };
 
-  const handleAction = async (action: 'reported' | 'deleted') => {
+  const handleAction = async (action: 'reported' | 'deleted' | 'blocked') => {
     if (!user || !email) return;
-    await supabase.functions.invoke('record-action', { body: { userId: user.id, emailId: email.id, action } });
-    toast({ title: action === 'reported' ? '🚨 Reported!' : '🗑️ Deleted!' });
+    const result = await supabase.functions.invoke('record-action', { body: { userId: user.id, emailId: email.id, action } });
+    const data = result.data;
+    
+    if (data?.alreadyRecorded) {
+      toast({ title: `Already ${action}!`, description: 'This action was already recorded for this email.' });
+    } else {
+      const titles = {
+        reported: '🚨 Reported!',
+        deleted: '🗑️ Deleted!',
+        blocked: '🚫 Blocked!'
+      };
+      toast({ title: titles[action] });
+    }
     navigate('/inbox');
   };
 
@@ -85,6 +96,9 @@ export default function EmailView() {
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={() => handleAction('reported')} className="gap-2">
                     <Flag className="h-4 w-4" /> Report
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => handleAction('blocked')} className="gap-2 text-destructive hover:text-destructive">
+                    <Ban className="h-4 w-4" /> Block
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => handleAction('deleted')} className="gap-2">
                     <Trash2 className="h-4 w-4" /> Delete
