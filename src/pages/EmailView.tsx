@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, AlertTriangle, ExternalLink, Flag, Trash2, CheckCircle, Shield, Ban } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -67,6 +67,45 @@ export default function EmailView() {
 
   const isPhishing = email.type === 'phishing' || email.type === 'suspicious';
 
+  const renderedBodyHtml = useMemo(() => {
+    // Ensure phishing links carry the originating emailId so the training page
+    // can correctly attribute + score the click/credential actions.
+    try {
+      const doc = new DOMParser().parseFromString(email.body_html, 'text/html');
+      doc.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((a) => {
+        const rawHref = a.getAttribute('href');
+        if (!rawHref) return;
+
+        const url = new URL(rawHref, window.location.origin);
+        if (url.pathname === '/phishing-trap') {
+          url.searchParams.set('from', email.id);
+          // Keep it relative so it works in any environment.
+          a.setAttribute('href', `${url.pathname}?${url.searchParams.toString()}`);
+        }
+      });
+      return doc.body.innerHTML;
+    } catch {
+      return email.body_html;
+    }
+  }, [email.body_html, email.id]);
+
+  const handleBodyClick: React.MouseEventHandler<HTMLDivElement> = (e) => {
+    const target = e.target as HTMLElement | null;
+    const anchor = target?.closest?.('a') as HTMLAnchorElement | null;
+    if (!anchor) return;
+
+    const rawHref = anchor.getAttribute('href');
+    if (!rawHref) return;
+
+    // Keep SPA navigation for phishing-trap and guarantee the `from` param.
+    const url = new URL(rawHref, window.location.origin);
+    if (url.pathname === '/phishing-trap') {
+      e.preventDefault();
+      url.searchParams.set('from', email.id);
+      navigate(`${url.pathname}?${url.searchParams.toString()}`);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
@@ -113,7 +152,11 @@ export default function EmailView() {
               </div>
             </div>
 
-            <div className="p-6" dangerouslySetInnerHTML={{ __html: email.body_html }} />
+            <div
+              className="p-6"
+              onClick={handleBodyClick}
+              dangerouslySetInnerHTML={{ __html: renderedBodyHtml }}
+            />
 
             {isPhishing && email.indicators.length > 0 && (
               <div className="p-6 border-t border-border bg-muted/30">
