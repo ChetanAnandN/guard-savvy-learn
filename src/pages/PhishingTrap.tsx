@@ -11,23 +11,35 @@ export default function PhishingTrap() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showWarning, setShowWarning] = useState(false);
+  const [credentialsRecorded, setCredentialsRecorded] = useState(false);
   const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+
+  const getEmailIdFromUrl = () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('from');
+  };
+
+  const recordAction = async (action: 'clicked_link' | 'typed_credentials') => {
+    if (!user) return;
+    const emailId = getEmailIdFromUrl();
+    if (!emailId) return;
+
+    try {
+      await supabase.functions.invoke('record-action', {
+        body: { userId: user.id, emailId, action },
+      });
+    } catch (err) {
+      console.error(`Error recording ${action}:`, err);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     // Record that user typed credentials (DO NOT STORE THE ACTUAL CREDENTIALS)
-    if (user) {
-      const urlParams = new URLSearchParams(window.location.search);
-      const emailId = urlParams.get('from');
-      if (emailId) {
-        await supabase.functions.invoke('record-action', {
-          body: { userId: user.id, emailId, action: 'typed_credentials' },
-        });
-      }
-    }
+    await recordAction('typed_credentials');
     
     setShowWarning(true);
   };
@@ -35,15 +47,7 @@ export default function PhishingTrap() {
   // Record link click on mount
   useEffect(() => {
     const recordLinkClick = async () => {
-      if (user) {
-        const urlParams = new URLSearchParams(window.location.search);
-        const emailId = urlParams.get('from');
-        if (emailId) {
-          await supabase.functions.invoke('record-action', {
-            body: { userId: user.id, emailId, action: 'clicked_link' },
-          });
-        }
-      }
+      await recordAction('clicked_link');
     };
     recordLinkClick();
   }, [user]);
@@ -90,11 +94,34 @@ export default function PhishingTrap() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="student@college.edu" required />
+            <Input
+              type="email"
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value);
+              }}
+              placeholder="student@college.edu"
+              required
+            />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required />
+            <Input
+              type="password"
+              value={password}
+              onChange={(e) => {
+                const next = e.target.value;
+                setPassword(next);
+
+                // Count "entering credentials" as soon as the user starts typing (once).
+                if (!credentialsRecorded && next.length > 0) {
+                  setCredentialsRecorded(true);
+                  recordAction('typed_credentials');
+                }
+              }}
+              placeholder="••••••••"
+              required
+            />
           </div>
           <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700">Sign In</Button>
         </form>
