@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, AlertTriangle, ExternalLink, Flag, Trash2, CheckCircle, Shield, Ban } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, Flag, Trash2, Shield, Ban } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -62,14 +62,9 @@ export default function EmailView() {
     navigate('/inbox');
   };
 
-  if (isLoading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
-  if (!email) return <div className="min-h-screen flex items-center justify-center">Email not found</div>;
-
-  const isPhishing = email.type === 'phishing' || email.type === 'suspicious';
-
+  // useMemo MUST be called unconditionally (before any early returns)
   const renderedBodyHtml = useMemo(() => {
-    // Ensure phishing links carry the originating emailId so the training page
-    // can correctly attribute + score the click/credential actions.
+    if (!email) return '';
     try {
       const doc = new DOMParser().parseFromString(email.body_html, 'text/html');
       doc.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((a) => {
@@ -79,7 +74,6 @@ export default function EmailView() {
         const url = new URL(rawHref, window.location.origin);
         if (url.pathname === '/phishing-trap') {
           url.searchParams.set('from', email.id);
-          // Keep it relative so it works in any environment.
           a.setAttribute('href', `${url.pathname}?${url.searchParams.toString()}`);
         }
       });
@@ -87,9 +81,10 @@ export default function EmailView() {
     } catch {
       return email.body_html;
     }
-  }, [email.body_html, email.id]);
+  }, [email?.body_html, email?.id]);
 
-  const handleBodyClick: React.MouseEventHandler<HTMLDivElement> = (e) => {
+  const handleBodyClick = useCallback<React.MouseEventHandler<HTMLDivElement>>((e) => {
+    if (!email) return;
     const target = e.target as HTMLElement | null;
     const anchor = target?.closest?.('a') as HTMLAnchorElement | null;
     if (!anchor) return;
@@ -97,14 +92,18 @@ export default function EmailView() {
     const rawHref = anchor.getAttribute('href');
     if (!rawHref) return;
 
-    // Keep SPA navigation for phishing-trap and guarantee the `from` param.
     const url = new URL(rawHref, window.location.origin);
     if (url.pathname === '/phishing-trap') {
       e.preventDefault();
       url.searchParams.set('from', email.id);
       navigate(`${url.pathname}?${url.searchParams.toString()}`);
     }
-  };
+  }, [email?.id, navigate]);
+
+  if (isLoading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+  if (!email) return <div className="min-h-screen flex items-center justify-center">Email not found</div>;
+
+  const isPhishing = email.type === 'phishing' || email.type === 'suspicious';
 
   return (
     <div className="min-h-screen bg-background">
