@@ -8,6 +8,57 @@ const corsHeaders = {
 
 const ADMIN_EMAIL = 'chetan1920681@gmail.com';
 
+// Scoring config - must match record-action and lib/scoring.ts
+const SCORING_CONFIG = {
+  Sbase: 50,
+  clickedPenaltyPercent: 10,
+  credentialsPenaltyPercent: 25,
+  reportedBonusPercent: 10,
+  blockedBonusPercent: 25,
+};
+
+interface ActionCounts {
+  opened: number;
+  clicked_link: number;
+  typed_credentials: number;
+  reported: number;
+  deleted: number;
+  blocked: number;
+}
+
+// Calculate score from actions - same formula as record-action
+function calculateScore(actions: Pick<ActionCounts, 'clicked_link' | 'typed_credentials' | 'reported' | 'blocked'>): number {
+  let score = SCORING_CONFIG.Sbase;
+
+  // Apply clicked link penalties (-10% each)
+  for (let i = 0; i < actions.clicked_link; i++) {
+    score = Math.max(0, score - (score * SCORING_CONFIG.clickedPenaltyPercent / 100));
+  }
+
+  // Apply credential penalties (-25% each)
+  for (let i = 0; i < actions.typed_credentials; i++) {
+    score = Math.max(0, score - (score * SCORING_CONFIG.credentialsPenaltyPercent / 100));
+  }
+
+  // Apply reporting bonuses (+10% each)
+  for (let i = 0; i < actions.reported; i++) {
+    score = Math.min(100, score + (score * SCORING_CONFIG.reportedBonusPercent / 100));
+  }
+
+  // Apply blocking bonuses (+25% each)
+  for (let i = 0; i < actions.blocked; i++) {
+    score = Math.min(100, score + (score * SCORING_CONFIG.blockedBonusPercent / 100));
+  }
+
+  return Math.round(Math.max(0, Math.min(100, score)));
+}
+
+function getRiskLevel(score: number): 'low' | 'medium' | 'high' {
+  if (score >= 40) return 'low';
+  if (score >= 20) return 'medium';
+  return 'high';
+}
+
 // Hash function matching login/register
 async function hashPassword(password: string): Promise<string> {
   const encoder = new TextEncoder();
@@ -29,20 +80,43 @@ serve(async (req) => {
 
     const { action, adminEmail, targetEmail, targetRole, targetPassword } = await req.json();
 
-    // Verify admin
-    if (adminEmail !== ADMIN_EMAIL) {
-      console.error('Unauthorized access attempt by:', adminEmail);
+    // Verify requester is an instructor
+    if (!adminEmail || typeof adminEmail !== 'string') {
       return new Response(
-        JSON.stringify({ error: 'Unauthorized. Admin access required.' }),
+        JSON.stringify({ error: 'Unauthorized. Requester email required.' }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    const { data: requester, error: requesterError } = await supabase
+      .from('users')
+      .select('email, role')
+      .eq('email', adminEmail)
+      .maybeSingle();
+
+    if (requesterError || !requester) {
+      console.error('Unauthorized access attempt by:', adminEmail, requesterError);
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized. Instructor access required.' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const canList = requester.role === 'instructor';
+    const canMutate = requester.email === ADMIN_EMAIL;
 
     console.log(`Admin action: ${action} by ${adminEmail}`);
 
     switch (action) {
       case 'list': {
-        // Get all users with their scores
+        if (!canList) {
+          return new Response(
+            JSON.stringify({ error: 'Unauthorized. Instructor access required.' }),
+            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // Get all users
         const { data: users, error: usersError } = await supabase
           .from('users')
           .select('*')
@@ -50,35 +124,50 @@ serve(async (req) => {
 
         if (usersError) throw usersError;
 
-        // Get all scores
-        const { data: scores, error: scoresError } = await supabase
-          .from('scores')
-          .select('*');
-
-        if (scoresError) throw scoresError;
-
-        // Get action counts per user
+        // Get all actions
         const { data: actions, error: actionsError } = await supabase
           .from('user_actions')
           .select('user_id, action');
 
         if (actionsError) throw actionsError;
 
-        // Combine data
-        const usersWithPerformance = users.map(user => {
-          const userScore = scores.find(s => s.user_id === user.id);
+        // Build user performance data with computed scores
+        const usersWithPerformance = await Promise.all(users.map(async (user) => {
           const userActions = actions.filter(a => a.user_id === user.id);
-          
-          const actionCounts = {
+
+          const actionCounts: ActionCounts = {
             opened: userActions.filter(a => a.action === 'opened').length,
             clicked_link: userActions.filter(a => a.action === 'clicked_link').length,
             typed_credentials: userActions.filter(a => a.action === 'typed_credentials').length,
             reported: userActions.filter(a => a.action === 'reported').length,
             deleted: userActions.filter(a => a.action === 'deleted').length,
+            blocked: userActions.filter(a => a.action === 'blocked').length,
           };
 
           const hasInteracted = userActions.length > 0;
-          
+
+          // Compute score from actions
+          const computedScore = calculateScore({
+            clicked_link: actionCounts.clicked_link,
+            typed_credentials: actionCounts.typed_credentials,
+            reported: actionCounts.reported,
+            blocked: actionCounts.blocked,
+          });
+
+          const computedRisk = getRiskLevel(computedScore);
+
+          // Sync score to database so individual user pages match
+          await supabase
+            .from('scores')
+            .upsert({
+              user_id: user.id,
+              score: computedScore,
+              risk_level: computedRisk,
+              total_phishing_clicked: actionCounts.clicked_link,
+              total_phishing_reported: actionCounts.reported,
+              last_updated: new Date().toISOString(),
+            }, { onConflict: 'user_id' });
+
           // Generate risk comment
           let riskComment = 'Normal - No interactions yet';
           if (hasInteracted) {
@@ -96,17 +185,17 @@ serve(async (req) => {
           return {
             ...user,
             has_password: !!user.password_hash,
-            password_hash: undefined, // Don't expose hash
-            score: userScore?.score ?? 100,
-            risk_level: userScore?.risk_level ?? 'low',
-            total_phishing_clicked: userScore?.total_phishing_clicked ?? 0,
-            total_phishing_reported: userScore?.total_phishing_reported ?? 0,
-            total_safe_opened: userScore?.total_safe_opened ?? 0,
+            password_hash: undefined,
+            score: computedScore,
+            risk_level: computedRisk,
+            total_phishing_clicked: actionCounts.clicked_link,
+            total_phishing_reported: actionCounts.reported,
+            total_safe_opened: actionCounts.opened,
             action_counts: actionCounts,
             has_interacted: hasInteracted,
             risk_comment: riskComment,
           };
-        });
+        }));
 
         return new Response(
           JSON.stringify({ success: true, users: usersWithPerformance }),
@@ -115,6 +204,13 @@ serve(async (req) => {
       }
 
       case 'add': {
+        if (!canMutate) {
+          return new Response(
+            JSON.stringify({ error: 'Unauthorized. Admin access required.' }),
+            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
         if (!targetEmail || !targetEmail.includes('@')) {
           return new Response(
             JSON.stringify({ error: 'Valid email is required' }),
@@ -122,7 +218,6 @@ serve(async (req) => {
           );
         }
 
-        // Check if user already exists
         const { data: existing } = await supabase
           .from('users')
           .select('id')
@@ -136,13 +231,11 @@ serve(async (req) => {
           );
         }
 
-        // Hash password if provided
         let passwordHash = null;
         if (targetPassword && targetPassword.length >= 6) {
           passwordHash = await hashPassword(targetPassword);
         }
 
-        // Add new user
         const { data: newUser, error: insertError } = await supabase
           .from('users')
           .insert({
@@ -156,14 +249,13 @@ serve(async (req) => {
 
         if (insertError) throw insertError;
 
-        // Initialize score
         await supabase.from('scores').insert({
           user_id: newUser.id,
-          score: 100,
+          score: SCORING_CONFIG.Sbase,
           risk_level: 'low',
         });
 
-        console.log('Added new user:', targetEmail, 'with password:', !!passwordHash);
+        console.log('Added new user:', targetEmail);
 
         return new Response(
           JSON.stringify({ success: true, user: newUser, message: 'User added successfully' }),
@@ -172,6 +264,13 @@ serve(async (req) => {
       }
 
       case 'update-password': {
+        if (!canMutate) {
+          return new Response(
+            JSON.stringify({ error: 'Unauthorized. Admin access required.' }),
+            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
         if (!targetEmail) {
           return new Response(
             JSON.stringify({ error: 'Email is required' }),
@@ -204,6 +303,13 @@ serve(async (req) => {
       }
 
       case 'remove': {
+        if (!canMutate) {
+          return new Response(
+            JSON.stringify({ error: 'Unauthorized. Admin access required.' }),
+            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
         if (!targetEmail) {
           return new Response(
             JSON.stringify({ error: 'Email is required' }),
@@ -218,7 +324,6 @@ serve(async (req) => {
           );
         }
 
-        // Get user ID first
         const { data: user } = await supabase
           .from('users')
           .select('id')
@@ -232,13 +337,9 @@ serve(async (req) => {
           );
         }
 
-        // Delete user actions
         await supabase.from('user_actions').delete().eq('user_id', user.id);
-        
-        // Delete user scores
         await supabase.from('scores').delete().eq('user_id', user.id);
-        
-        // Delete user
+
         const { error: deleteError } = await supabase
           .from('users')
           .delete()

@@ -54,14 +54,13 @@ export default function InstructorAnalytics() {
           blocked: u.action_counts?.blocked || 0,
           deleted: u.action_counts?.deleted || 0,
         };
-        const score = typeof u.score === 'number' ? u.score : calculateScore(actions);
-        const hasInteracted = typeof u.has_interacted === 'boolean'
-          ? u.has_interacted
-          : Object.values(actions).some((v) => v > 0);
+        // Use backend-computed score directly (already synced with scores table)
+        const score = typeof u.score === 'number' ? u.score : 50;
+        const hasInteracted = u.has_interacted ?? false;
         return {
           email: u.email,
           score,
-          riskLevel: (u.risk_level as string) || getRiskLevel(score),
+          riskLevel: u.risk_level || 'low',
           actions,
           hasInteracted,
         };
