@@ -21,19 +21,26 @@ interface UserStats {
 }
 
 export default function InstructorAnalytics() {
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const [users, setUsers] = useState<UserStats[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    if (authLoading) return;
+    if (!user?.email) {
+      setIsLoading(false);
+      return;
+    }
     fetchData();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, user?.email]);
 
   const fetchData = async () => {
+    if (!user?.email) return;
     setIsLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke('admin-users', {
-        body: { action: 'list', adminEmail: user?.email },
+        body: { action: 'list', adminEmail: user.email },
       });
 
       if (error) throw error;
@@ -47,12 +54,14 @@ export default function InstructorAnalytics() {
           blocked: u.action_counts?.blocked || 0,
           deleted: u.action_counts?.deleted || 0,
         };
-        const score = calculateScore(actions);
-        const hasInteracted = u.has_interacted;
+        const score = typeof u.score === 'number' ? u.score : calculateScore(actions);
+        const hasInteracted = typeof u.has_interacted === 'boolean'
+          ? u.has_interacted
+          : Object.values(actions).some((v) => v > 0);
         return {
           email: u.email,
           score,
-          riskLevel: getRiskLevel(score),
+          riskLevel: (u.risk_level as string) || getRiskLevel(score),
           actions,
           hasInteracted,
         };

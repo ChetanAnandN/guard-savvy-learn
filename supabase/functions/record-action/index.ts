@@ -65,6 +65,11 @@ function calculateScore(actions: ActionCounts): number {
   return Math.round(Math.max(0, Math.min(100, score)) * 100) / 100;
 }
 
+function toIntegerScore(score: number): number {
+  // DB column is integer; keep backend + UI consistent.
+  return Math.round(Math.max(0, Math.min(100, score)));
+}
+
 function getRiskLevel(score: number): "low" | "medium" | "high" {
   if (score >= 40) return "low";
   if (score >= 20) return "medium";
@@ -111,13 +116,17 @@ const handler = async (req: Request): Promise<Response> => {
     // For scoring actions, check if already recorded for this email
     const scoringActions = ["clicked_link", "typed_credentials", "reported", "blocked"];
     if (scoringActions.includes(action)) {
-      const { data: existingAction } = await supabase
+      const { data: existingAction, error: existingActionError } = await supabase
         .from("user_actions")
         .select("id")
         .eq("user_id", userId)
         .eq("email_id", emailId)
         .eq("action", action)
-        .single();
+        .maybeSingle();
+
+      if (existingActionError) {
+        console.error("Error checking existing action:", existingActionError);
+      }
 
       if (existingAction) {
         console.log("Action already recorded for this email:", { userId, emailId, action });
@@ -173,7 +182,7 @@ const handler = async (req: Request): Promise<Response> => {
     }
 
     // Calculate new score using the percentage-based formula
-    const newScore = calculateScore(actionCounts);
+    const newScore = toIntegerScore(calculateScore(actionCounts));
     const riskLevel = getRiskLevel(newScore);
 
     // Check if score record exists
@@ -185,7 +194,7 @@ const handler = async (req: Request): Promise<Response> => {
 
     if (scoreError) {
       // Create score record if doesn't exist
-      await supabase.from("scores").insert({
+      const { error: insertScoreError } = await supabase.from("scores").insert({
         user_id: userId,
         score: newScore,
         risk_level: riskLevel,
@@ -193,6 +202,11 @@ const handler = async (req: Request): Promise<Response> => {
         total_phishing_reported: actionCounts.reported,
         total_safe_opened: email.type === "safe" && action === "opened" ? 1 : 0,
       });
+
+      if (insertScoreError) {
+        console.error("Error inserting score:", insertScoreError);
+        throw insertScoreError;
+      }
     } else {
       const updates: any = {
         score: newScore,
@@ -206,10 +220,15 @@ const handler = async (req: Request): Promise<Response> => {
         updates.total_safe_opened = (currentScore.total_safe_opened || 0) + 1;
       }
 
-      await supabase
+      const { error: updateScoreError } = await supabase
         .from("scores")
         .update(updates)
         .eq("user_id", userId);
+
+      if (updateScoreError) {
+        console.error("Error updating score:", updateScoreError);
+        throw updateScoreError;
+      }
     }
 
     const scoreChange = currentScore ? newScore - currentScore.score : 0;
