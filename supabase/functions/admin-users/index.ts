@@ -6,7 +6,10 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const ADMIN_EMAIL = 'chetan1920681@gmail.com';
+// Primary admin (project owner) - can perform all actions
+const PRIMARY_ADMIN_EMAIL = 'chetan1920681@gmail.com';
+// Secondary admin - also has full access
+const SECONDARY_ADMIN_EMAIL = 'ibrahimkasheef1@gmail.com';
 
 // Scoring config - must match record-action and lib/scoring.ts
 const SCORING_CONFIG = {
@@ -103,7 +106,9 @@ serve(async (req) => {
     }
 
     const canList = requester.role === 'instructor';
-    const canMutate = requester.email === ADMIN_EMAIL;
+    // Both primary admin and secondary admin can mutate, or any instructor
+    const isAdmin = requester.email === PRIMARY_ADMIN_EMAIL || requester.email === SECONDARY_ADMIN_EMAIL;
+    const canMutate = isAdmin || requester.role === 'instructor';
 
     console.log(`Admin action: ${action} by ${adminEmail}`);
 
@@ -317,7 +322,7 @@ serve(async (req) => {
           );
         }
 
-        if (targetEmail === ADMIN_EMAIL) {
+        if (targetEmail === PRIMARY_ADMIN_EMAIL || targetEmail === SECONDARY_ADMIN_EMAIL) {
           return new Response(
             JSON.stringify({ error: 'Cannot remove admin user' }),
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
